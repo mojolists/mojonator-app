@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mojonator — Reseller Insights</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root{
+    --green:#16a34a; --green-dark:#15803d; --green-light:#dcfce7; --green-soft:#f0fdf4;
+    --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --bg:#f8fafc; --card:#ffffff;
+    --red:#dc2626; --amber:#d97706; --sidebar:#0b3d24;
+    --radius:12px; --shadow:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.04);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);font-size:14px;line-height:1.45}
+  a{color:var(--green-dark);text-decoration:none}
+  .app{display:flex;min-height:100vh}
+
+  /* Sidebar */
+  .sidebar{width:220px;background:var(--sidebar);color:#cbe7d6;display:flex;flex-direction:column;position:fixed;top:0;bottom:0;left:0}
+  .brand{padding:20px 18px;display:flex;align-items:center;gap:10px;font-weight:800;font-size:19px;color:#fff;letter-spacing:.3px}
+  .brand .dot{width:26px;height:26px;border-radius:7px;background:var(--green);display:flex;align-items:center;justify-content:center;font-size:15px}
+  .nav{flex:1;padding:8px 10px;overflow-y:auto}
+  .nav a{display:flex;align-items:center;gap:11px;color:#a7cbb6;padding:10px 12px;border-radius:9px;cursor:pointer;font-weight:500;margin-bottom:2px}
+  .nav a .ic{width:18px;text-align:center;font-size:15px;opacity:.9}
+  .nav a:hover{background:rgba(255,255,255,.06);color:#fff}
+  .nav a.active{background:var(--green);color:#fff}
+  .side-foot{padding:14px 16px;font-size:11px;color:#6f9a82;border-top:1px solid rgba(255,255,255,.08)}
+
+  /* Main */
+  .main{margin-left:220px;flex:1;display:flex;flex-direction:column;min-width:0}
+  .topbar{background:var(--card);border-bottom:1px solid var(--line);padding:12px 24px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:20;flex-wrap:wrap}
+  .topbar h1{font-size:18px;font-weight:700;margin-right:auto}
+  .content{padding:24px;max-width:1240px;width:100%}
+
+  select,input,textarea,button{font-family:inherit;font-size:14px}
+  .field{display:flex;flex-direction:column;gap:5px}
+  .field label{font-size:12px;font-weight:600;color:var(--muted)}
+  select,input[type=text],input[type=number],input[type=date],textarea{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#fff;color:var(--ink);width:100%}
+  select:focus,input:focus,textarea:focus{outline:none;border-color:var(--green)}
+  .pill-select{display:inline-flex;background:var(--green-soft);border:1px solid var(--green-light);border-radius:9px;padding:2px}
+  .pill-select button{border:none;background:transparent;padding:6px 12px;border-radius:7px;cursor:pointer;color:var(--green-dark);font-weight:600}
+  .pill-select button.active{background:var(--green);color:#fff}
+
+  .btn{border:1px solid var(--green);background:var(--green);color:#fff;padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:600;display:inline-flex;align-items:center;gap:7px}
+  .btn:hover{background:var(--green-dark);border-color:var(--green-dark)}
+  .btn.ghost{background:#fff;color:var(--green-dark)}
+  .btn.ghost:hover{background:var(--green-soft)}
+  .btn.gray{background:#fff;color:var(--muted);border-color:var(--line)}
+  .btn.gray:hover{background:var(--bg)}
+  .btn.sm{padding:5px 10px;font-size:12.5px}
+  .btn.danger{background:#fff;color:var(--red);border-color:#fecaca}
+  .btn.danger:hover{background:#fef2f2}
+
+  /* Cards */
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:22px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow)}
+  .kpi .label{font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+  .kpi .val{font-size:26px;font-weight:800;margin-top:6px}
+  .kpi .sub{font-size:12px;color:var(--muted);margin-top:3px}
+  .kpi .val.pos{color:var(--green)} .kpi .val.neg{color:var(--red)}
+
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);margin-bottom:22px}
+  .panel-head{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px}
+  .panel-head h2{font-size:15px;font-weight:700}
+  .panel-head .spacer{margin-left:auto}
+  .panel-body{padding:18px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+  @media(max-width:900px){.grid2{grid-template-columns:1fr}}
+
+  table{width:100%;border-collapse:collapse}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;white-space:nowrap}
+  th{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);cursor:pointer;user-select:none}
+  th:hover{color:var(--green-dark)}
+  tbody tr:hover{background:var(--green-soft)}
+  td.num,th.num{text-align:right}
+  .tag{display:inline-block;background:var(--green-light);color:var(--green-dark);border-radius:20px;padding:2px 9px;font-size:11px;font-weight:600;margin:1px 2px}
+  .status{display:inline-block;border-radius:20px;padding:2px 10px;font-size:11px;font-weight:700}
+  .s-sourced{background:#e0e7ff;color:#4338ca}
+  .s-listed{background:#fef3c7;color:#b45309}
+  .s-sold{background:var(--green-light);color:var(--green-dark)}
+  .s-returned{background:#fee2e2;color:#b91c1c}
+  .s-shipped{background:#cffafe;color:#0e7490}
+  .acct-badge{font-size:10px;font-weight:700;padding:1px 7px;border-radius:5px;background:#eef2ff;color:#4338ca}
+  .acct-B{background:#fef9c3;color:#854d0e}
+
+  .tablewrap{overflow-x:auto}
+  .muted{color:var(--muted)}
+  .right{text-align:right}
+  .pos{color:var(--green)} .neg{color:var(--red)}
+  .toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+  .toolbar .grow{flex:1;min-width:160px}
+
+  /* Modal */
+  .overlay{position:fixed;inset:0;background:rgba(15,23,42,.5);display:none;align-items:flex-start;justify-content:center;z-index:50;padding:40px 16px;overflow-y:auto}
+  .overlay.open{display:flex}
+  .modal{background:#fff;border-radius:14px;width:100%;max-width:640px;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+  .modal-head{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center}
+  .modal-head h3{font-size:16px}
+  .modal-head .x{margin-left:auto;cursor:pointer;font-size:22px;color:var(--muted);line-height:1;border:none;background:none}
+  .modal-body{padding:20px}
+  .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .form-grid .full{grid-column:1/-1}
+  .modal-foot{padding:14px 20px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end}
+  .hint{font-size:12px;color:var(--muted);margin-top:4px}
+
+  .empty{text-align:center;padding:50px 20px;color:var(--muted)}
+  .empty .big{font-size:40px;margin-bottom:10px}
+  .bars{display:flex;flex-direction:column;gap:10px}
+  .barrow{display:grid;grid-template-columns:130px 1fr 90px;align-items:center;gap:10px;font-size:13px}
+  .bar{height:22px;background:var(--green-light);border-radius:6px;position:relative;overflow:hidden}
+  .bar > span{position:absolute;left:0;top:0;bottom:0;background:var(--green);border-radius:6px}
+  .agebucket{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+  .agebucket .b{border:1px solid var(--line);border-radius:10px;padding:16px;text-align:center}
+  .agebucket .b .n{font-size:24px;font-weight:800}
+  .agebucket .b.warn .n{color:var(--amber)} .agebucket .b.bad .n{color:var(--red)}
+  .note{background:var(--green-soft);border:1px solid var(--green-light);border-radius:10px;padding:14px 16px;font-size:13px;margin-bottom:16px}
+  .note code{background:#fff;border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+  .row-actions{display:flex;gap:6px}
+  .icon-btn{border:1px solid var(--line);background:#fff;border-radius:7px;padding:4px 8px;cursor:pointer;font-size:12px}
+  .icon-btn:hover{background:var(--green-soft);border-color:var(--green-light)}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:13px}
+  .kv .k{color:var(--muted)}
+  .steps{counter-reset:s;margin:8px 0 0}
+  .steps li{margin:0 0 10px 0;padding-left:6px}
+  .checkline{display:flex;gap:8px;align-items:center;font-size:13px;margin-bottom:8px}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="brand"><span class="dot">$</span> Mojonator</div>
+    <nav class="nav" id="nav">
+      <a data-view="dashboard" class="active"><span class="ic">◧</span> Dashboard</a>
+      <a data-view="inventory"><span class="ic">▦</span> Inventory</a>
+      <a data-view="sales"><span class="ic">◆</span> Sales</a>
+      <a data-view="insights"><span class="ic">◔</span> Insights</a>
+      <a data-view="aging"><span class="ic">⏱</span> Aging</a>
+      <a data-view="sourcing"><span class="ic">⇄</span> Sourcing</a>
+      <a data-view="income"><span class="ic">▤</span> Income statement</a>
+      <a data-view="data"><span class="ic">⇪</span> Import / Export</a>
+      <a data-view="settings"><span class="ic">⚙</span> Settings</a>
+    </nav>
+    <div class="side-foot">Mojonator v1.0<br>Local · GitHub-sync ready</div>
+  </aside>
+
+  <!-- Main -->
+  <div class="main">
+    <div class="topbar">
+      <h1 id="viewTitle">Dashboard</h1>
+      <div class="field" style="min-width:150px">
+        <div class="pill-select" id="acctSwitch"></div>
+      </div>
+      <div class="field">
+        <select id="rangeSel" style="width:170px">
+          <option value="7">Last 7 days</option>
+          <option value="30">Last 30 days</option>
+          <option value="90" selected>Last 90 days</option>
+          <option value="365">Last 12 months</option>
+          <option value="ytd">Year to date</option>
+          <option value="all">All time</option>
+        </select>
+      </div>
+      <button class="btn" id="quickAdd">＋ Add item</button>
+    </div>
+    <div class="content" id="content"></div>
+  </div>
+</div>
+
+<!-- Item modal -->
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <div class="modal-head"><h3 id="modalTitle">Add item</h3><button class="x" onclick="closeModal()">×</button></div>
+    <div class="modal-body">
+      <div class="form-grid" id="itemForm"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn danger" id="delBtn" style="margin-right:auto;display:none" onclick="deleteCurrent()">Delete</button>
+      <button class="btn gray" onclick="closeModal()">Cancel</button>
+      <button class="btn" onclick="saveItem()">Save item</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---------------- Data layer ---------------- */
+const LS_KEY = 'mojonator_data_v1';
+const uid = () => Math.random().toString(36).slice(2,9);
+const todayISO = () => new Date().toISOString().slice(0,10);
+
+const DEFAULT_DATA = {
+  settings:{
+    accounts:[{id:'A',name:'Account A'},{id:'B',name:'Account B'}],
+    categories:['Laptop','Desktop','Music CD','Vinyl','DVD','Parts','Other'],
+    locations:['Shelf A','Shelf B','Bin 1','Bin 2','Storage'],
+    sources:['Goodwill','Estate sale','Facebook Marketplace','Yard sale','Auction','Wholesale'],
+    marketplaces:['eBay','Mercari','Facebook','Local','Etsy','Other'],
+    customFields:['Condition grade','Battery health'],
+    feeRateA:13.25, feeRateB:13.25,
+    ghRepo:'mojolists/mojonator', ghBranch:'main', ghToken:'', ghAutoPull:true
+  },
+  items:[]
+};
+
+let DATA = load();
+let STATE = { view:'dashboard', account:'all', range:'90', sort:{key:'purchaseDate',dir:-1}, invFilter:'', editingId:null };
+let charts = {};
+
+function load(){
+  try{
+    const raw = (typeof localStorage!=='undefined') && localStorage.getItem(LS_KEY);
+    if(raw) return migrate(JSON.parse(raw));
+  }catch(e){}
+  return structuredCloneSafe(DEFAULT_DATA);
+}
+function migrate(d){ d.settings = Object.assign({}, DEFAULT_DATA.settings, d.settings||{}); d.items = d.items||[]; return d; }
+function structuredCloneSafe(o){ return JSON.parse(JSON.stringify(o)); }
+function save(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(DATA)); }catch(e){} }
+
+/* ---------------- GitHub sync (pull/push data.json) ---------------- */
+/* Repo data.json is the source of truth. The GitHub Action writes eBay
+   sales into it server-side; the app pulls it, you add costs, you push. */
+const EBAY_FIELDS = ['title','salePrice','saleDate','ebayFees','shipCost','status','marketplace','ebayItemId'];
+const MANUAL_FIELDS = ['cost','source','location','category','purchaseDate','tags','custom','notes','consignPartner','consignSplit','itemId','listedDate','refund','otherFees'];
+function b64encode(s){ return btoa(unescape(encodeURIComponent(s))); }
+function b64decode(s){ return decodeURIComponent(escape(atob(s.replace(/\s/g,'')))); }
+function ghHeaders(){ const t=DATA.settings.ghToken; return t?{Authorization:'Bearer '+t,Accept:'application/vnd.github+json'}:{Accept:'application/vnd.github+json'}; }
+function ghUrl(){ return `https://api.github.com/repos/${DATA.settings.ghRepo}/contents/data.json`; }
+
+// Merge incoming (repo) items into local: eBay fields from incoming,
+// manual fields kept locally when incoming lacks them. No duplicates.
+function clientMerge(incoming){
+  const key = it => it.ebayOrderId || it.id;
+  const localByKey = new Map(DATA.items.map(it=>[key(it),it]));
+  let added=0, updated=0;
+  incoming.forEach(inc=>{
+    const m=localByKey.get(key(inc));
+    if(m){
+      EBAY_FIELDS.forEach(f=>{ if(inc[f]!==''&&inc[f]!=null) m[f]=inc[f]; });
+      MANUAL_FIELDS.forEach(f=>{ const empty=(m[f]===''||m[f]==null||(Array.isArray(m[f])&&!m[f].length)); if(empty && inc[f]!=null && inc[f]!=='') m[f]=inc[f]; });
+      updated++;
+    } else { DATA.items.push(inc); added++; }
+  });
+  return {added,updated};
+}
+
+async function pullFromGitHub(silent){
+  const s=DATA.settings;
+  if(!s.ghToken){ if(!silent) alert('Add a GitHub token in Settings first (needs Contents: read).'); return; }
+  try{
+    const r=await fetch(ghUrl()+'?ref='+encodeURIComponent(s.ghBranch),{headers:ghHeaders()});
+    if(r.status===404){ if(!silent) alert('No data.json in the repo yet — push once to create it (or wait for the first eBay sync).'); return; }
+    if(!r.ok) throw new Error(r.status+' '+(await r.text()).slice(0,140));
+    const j=await r.json();
+    const remote=JSON.parse(b64decode(j.content));
+    DATA._sha=j.sha;
+    if(remote.settings){ // keep local token/secrets, take the rest
+      const keep={ghToken:s.ghToken,ghRepo:s.ghRepo,ghBranch:s.ghBranch,ghAutoPull:s.ghAutoPull};
+      DATA.settings=Object.assign({},DEFAULT_DATA.settings,remote.settings,keep);
+    }
+    const res=clientMerge(remote.items||[]);
+    save(); buildAcctSwitch(); if(STATE.view) render();
+    if(!silent) alert(`Pulled from GitHub: ${res.added} new, ${res.updated} updated.`);
+  }catch(e){ if(!silent) alert('Pull failed: '+e.message); }
+}
+
+async function pushToGitHub(){
+  const s=DATA.settings;
+  if(!s.ghToken){ alert('Add a GitHub token in Settings first (needs Contents: read & write).'); return; }
+  try{
+    // get current sha (in case it changed)
+    let sha=DATA._sha;
+    const head=await fetch(ghUrl()+'?ref='+encodeURIComponent(s.ghBranch),{headers:ghHeaders()});
+    if(head.ok){ sha=(await head.json()).sha; } else if(head.status!==404){ throw new Error(head.status+''); }
+    const payload=structuredCloneSafe(DATA); delete payload._sha;
+    // don't write the token into the repo file
+    payload.settings=Object.assign({},payload.settings,{ghToken:''});
+    const body={ message:'Mojonator app update '+new Date().toISOString(), content:b64encode(JSON.stringify(payload,null,2)), branch:s.ghBranch };
+    if(sha) body.sha=sha;
+    const r=await fetch(ghUrl(),{method:'PUT',headers:Object.assign({'Content-Type':'application/json'},ghHeaders()),body:JSON.stringify(body)});
+    if(!r.ok) throw new Error(r.status+' '+(await r.text()).slice(0,140));
+    DATA._sha=(await r.json()).content.sha;
+    alert('Pushed to GitHub. Your other computers can now Pull to sync.');
+  }catch(e){ alert('Push failed: '+e.message); }
+}
+
+/* ---------------- Money / profit math ---------------- */
+const money = n => (n<0?'-$':'$')+Math.abs(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const money0 = n => (n<0?'-$':'$')+Math.abs(Math.round(n||0)).toLocaleString('en-US');
+const pct = n => (n==null||!isFinite(n))?'—':(n>=0?'':'-')+Math.abs(n).toFixed(1)+'%';
+const num = v => { const n=parseFloat(v); return isNaN(n)?0:n; };
+
+function netProfit(it){
+  if(it.status!=='sold' && it.status!=='shipped' && it.status!=='returned') return null;
+  const gross = num(it.salePrice);
+  const refund = num(it.refund);
+  const fees = num(it.ebayFees) + num(it.otherFees);
+  const ship = num(it.shipCost);
+  const cogs = num(it.cost);
+  let consign = 0;
+  if(it.consignPartner && it.consignSplit) consign = (gross - fees - ship) * (num(it.consignSplit)/100);
+  return gross - refund - fees - ship - cogs - consign;
+}
+function roi(it){ const n=netProfit(it); const c=num(it.cost); if(n==null||c<=0) return null; return n/c*100; }
+function isSold(it){ return it.status==='sold'||it.status==='shipped'; }
+function daysBetween(a,b){ return Math.floor((new Date(b)-new Date(a))/86400000); }
+function daysInStock(it){ const end = isSold(it)&&it.saleDate ? it.saleDate : todayISO(); return Math.max(0,daysBetween(it.purchaseDate||todayISO(), end)); }
+
+/* ---------------- Filtering ---------------- */
+function acctItems(){ return DATA.items.filter(it => STATE.account==='all' || it.account===STATE.account); }
+function rangeStart(){
+  const r=STATE.range;
+  if(r==='all') return null;
+  if(r==='ytd') return new Date(new Date().getFullYear(),0,1).toISOString().slice(0,10);
+  const d=new Date(); d.setDate(d.getDate()-parseInt(r)); return d.toISOString().slice(0,10);
+}
+function soldInRange(){
+  const start=rangeStart();
+  return acctItems().filter(it => isSold(it) && it.saleDate && (!start || it.saleDate>=start));
+}
+function acctName(id){ const a=DATA.settings.accounts.find(x=>x.id===id); return a?a.name:id; }
+
+/* ---------------- Render router ---------------- */
+const TITLES={dashboard:'Dashboard',inventory:'Inventory',sales:'Sales',insights:'Insights',aging:'Inventory aging',sourcing:'Sourcing report',income:'Income statement',data:'Import / Export',settings:'Settings'};
+function render(){
+  document.getElementById('viewTitle').textContent = TITLES[STATE.view];
+  document.querySelectorAll('#nav a').forEach(a=>a.classList.toggle('active',a.dataset.view===STATE.view));
+  const c=document.getElementById('content');
+  destroyCharts();
+  ({dashboard:renderDashboard,inventory:renderInventory,sales:renderSales,insights:renderInsights,
+    aging:renderAging,sourcing:renderSourcing,income:renderIncome,data:renderData,settings:renderSettings}[STATE.view])(c);
+}
+function destroyCharts(){ Object.values(charts).forEach(ch=>{try{ch.destroy()}catch(e){}}); charts={}; }
+
+/* ---------------- Dashboard ---------------- */
+function renderDashboard(c){
+  const sold=soldInRange();
+  const gross=sold.reduce((s,it)=>s+num(it.salePrice),0);
+  const net=sold.reduce((s,it)=>s+(netProfit(it)||0),0);
+  const units=sold.length;
+  const invItems=acctItems().filter(it=>!isSold(it)&&it.status!=='returned');
+  const cashIn=invItems.reduce((s,it)=>s+num(it.cost),0);
+  const rois=sold.map(roi).filter(x=>x!=null);
+  const avgRoi=rois.length?rois.reduce((a,b)=>a+b,0)/rois.length:null;
+  const revenue=sold.reduce((s,it)=>s+num(it.salePrice)-num(it.refund),0);
+  const margin=revenue>0?net/revenue*100:null;
+
+  c.innerHTML=`
+  <div class="cards">
+    ${kpi('Net profit',money0(net),net>=0?'pos':'neg',units+' units sold')}
+    ${kpi('Gross sales',money0(gross),'', 'in selected range')}
+    ${kpi('Avg ROI',pct(avgRoi),avgRoi>=0?'pos':'neg','per sold item')}
+    ${kpi('Net margin',pct(margin),margin>=0?'pos':'neg','net ÷ revenue')}
+    ${kpi('Units sold',units,'', 'in selected range')}
+    ${kpi('Cash in inventory',money0(cashIn),'',invItems.length+' unsold items')}
+  </div>
+  <div class="grid2">
+    <div class="panel"><div class="panel-head"><h2>Gross vs. net over time</h2></div><div class="panel-body"><canvas id="trendChart" height="220"></canvas></div></div>
+    <div class="panel"><div class="panel-head"><h2>Net profit by source</h2></div><div class="panel-body"><canvas id="sourceChart" height="220"></canvas></div></div>
+  </div>
+  <div class="panel">
+    <div class="panel-head"><h2>Recent sales</h2><div class="spacer"></div><a onclick="go('sales')">View all →</a></div>
+    <div class="tablewrap"><table><thead><tr><th>Item ID</th><th>Title</th><th>Acct</th><th>Sold</th><th class="num">Sale</th><th class="num">Net</th><th class="num">ROI</th></tr></thead>
+    <tbody>${sold.slice().sort((a,b)=>(b.saleDate||'').localeCompare(a.saleDate||'')).slice(0,8).map(it=>`
+      <tr onclick="editItem('${it.id}')" style="cursor:pointer">
+        <td><strong>${esc(it.itemId||'—')}</strong></td><td>${esc(it.title||'')}</td>
+        <td><span class="acct-badge acct-${it.account}">${esc(acctName(it.account))}</span></td>
+        <td>${it.saleDate||'—'}</td><td class="num">${money(num(it.salePrice))}</td>
+        <td class="num ${netProfit(it)>=0?'pos':'neg'}">${money(netProfit(it))}</td>
+        <td class="num">${pct(roi(it))}</td></tr>`).join('')||`<tr><td colspan="7" class="muted" style="text-align:center;padding:30px">No sales in range. Add items or load sample data in Import / Export.</td></tr>`}
+    </tbody></table></div>
+  </div>`;
+  drawTrend(sold); drawSource(sold);
+}
+function kpi(label,val,cls,sub){ return `<div class="card kpi"><div class="label">${label}</div><div class="val ${cls||''}">${val}</div><div class="sub">${sub||''}</div></div>`; }
+
+function monthKey(d){ return (d||'').slice(0,7); }
+function drawTrend(sold){
+  const el=document.getElementById('trendChart'); if(!el||typeof Chart==='undefined')return;
+  const byM={};
+  sold.forEach(it=>{ const k=monthKey(it.saleDate); if(!k)return; byM[k]=byM[k]||{g:0,n:0}; byM[k].g+=num(it.salePrice); byM[k].n+=(netProfit(it)||0); });
+  const keys=Object.keys(byM).sort();
+  charts.trend=new Chart(el,{type:'line',data:{labels:keys,datasets:[
+    {label:'Gross',data:keys.map(k=>byM[k].g),borderColor:'#94a3b8',backgroundColor:'rgba(148,163,184,.1)',tension:.3,fill:true},
+    {label:'Net',data:keys.map(k=>byM[k].n),borderColor:'#16a34a',backgroundColor:'rgba(22,163,74,.12)',tension:.3,fill:true}
+  ]},options:chartOpts()});
+}
+function drawSource(sold){
+  const el=document.getElementById('sourceChart'); if(!el||typeof Chart==='undefined')return;
+  const by={}; sold.forEach(it=>{ const s=it.source||'Unknown'; by[s]=(by[s]||0)+(netProfit(it)||0); });
+  const keys=Object.keys(by).sort((a,b)=>by[b]-by[a]).slice(0,7);
+  charts.source=new Chart(el,{type:'bar',data:{labels:keys,datasets:[{label:'Net profit',data:keys.map(k=>by[k]),backgroundColor:'#16a34a',borderRadius:6}]},options:chartOpts(true)});
+}
+function chartOpts(noLegend){ return {responsive:true,maintainAspectRatio:false,plugins:{legend:{display:!noLegend,position:'bottom'}},scales:{y:{ticks:{callback:v=>'$'+v}}}}; }
+
+/* ---------------- Inventory ---------------- */
+function renderInventory(c){
+  const q=STATE.invFilter.toLowerCase();
+  let items=acctItems().filter(it=>{
+    if(STATE.invStatus && STATE.invStatus!=='all' && it.status!==STATE.invStatus) return false;
+    if(!q) return true;
+    return [it.itemId,it.title,it.location,it.source,it.category,(it.tags||[]).join(' ')].join(' ').toLowerCase().includes(q);
+  });
+  items=sortItems(items);
+  c.innerHTML=`
+  <div class="toolbar">
+    <input class="grow" type="text" id="invSearch" placeholder="Search item ID, title, location, tag…" value="${esc(STATE.invFilter)}">
+    <select id="invStatusSel" style="width:150px">
+      <option value="all">All statuses</option>
+      ${['sourced','listed','sold','shipped','returned'].map(s=>`<option value="${s}" ${STATE.invStatus===s?'selected':''}>${cap(s)}</option>`).join('')}
+    </select>
+    <button class="btn" onclick="newItem()">＋ Add item</button>
+  </div>
+  <div class="panel"><div class="tablewrap"><table>
+    <thead><tr>
+      ${th('itemId','Item ID')}${th('title','Title')}${th('category','Category')}
+      <th>Acct</th>${th('location','Location')}${th('source','Source')}
+      ${th('cost','Cost','num')}${th('purchaseDate','Purchased','num')}
+      ${th('_days','Days','num')}<th>Status</th>${th('_net','Net','num')}${th('_roi','ROI','num')}<th></th>
+    </tr></thead>
+    <tbody>${items.map(rowInv).join('')||emptyRow(12)}</tbody>
+  </table></div></div>
+  <div class="muted" style="margin-top:10px">${items.length} item(s) · ${money(items.reduce((s,it)=>s+num(it.cost),0))} total cost</div>`;
+  document.getElementById('invSearch').addEventListener('input',e=>{STATE.invFilter=e.target.value; renderInventory(c);});
+  document.getElementById('invStatusSel').addEventListener('change',e=>{STATE.invStatus=e.target.value; renderInventory(c);});
+}
+function rowInv(it){
+  const n=netProfit(it);
+  return `<tr>
+    <td onclick="editItem('${it.id}')" style="cursor:pointer"><strong>${esc(it.itemId||'—')}</strong></td>
+    <td onclick="editItem('${it.id}')" style="cursor:pointer">${esc(it.title||'')} ${(it.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</td>
+    <td>${esc(it.category||'—')}</td>
+    <td><span class="acct-badge acct-${it.account}">${esc(acctName(it.account))}</span></td>
+    <td>${esc(it.location||'—')}</td><td>${esc(it.source||'—')}</td>
+    <td class="num">${money(num(it.cost))}</td><td class="num">${it.purchaseDate||'—'}</td>
+    <td class="num">${daysInStock(it)}</td>
+    <td><span class="status s-${it.status}">${cap(it.status)}</span></td>
+    <td class="num ${n>=0?'pos':'neg'}">${n==null?'—':money(n)}</td>
+    <td class="num">${pct(roi(it))}</td>
+    <td class="row-actions"><button class="icon-btn" onclick="editItem('${it.id}')">Edit</button></td>
+  </tr>`;
+}
+function sortItems(items){
+  const {key,dir}=STATE.sort;
+  const val=it=> key==='_days'?daysInStock(it): key==='_net'?(netProfit(it)??-1e15): key==='_roi'?(roi(it)??-1e15): key==='cost'?num(it.cost): (it[key]||'');
+  return items.sort((a,b)=>{ const x=val(a),y=val(b); if(x<y)return -1*dir; if(x>y)return 1*dir; return 0; });
+}
+function th(key,label,cls){ const active=STATE.sort.key===key; const arrow=active?(STATE.sort.dir>0?' ▲':' ▼'):''; return `<th class="${cls||''}" onclick="setSort('${key}')">${label}${arrow}</th>`; }
+function setSort(k){ if(STATE.sort.key===k)STATE.sort.dir*=-1; else STATE.sort={key:k,dir:1}; render(); }
+function emptyRow(cols){ return `<tr><td colspan="${cols}" class="empty"><div class="big">▦</div>No items yet. Click <strong>Add item</strong> or load sample data in Import / Export.</td></tr>`; }
+
+/* ---------------- Sales ---------------- */
+function renderSales(c){
+  const sold=soldInRange().slice().sort((a,b)=>(b.saleDate||'').localeCompare(a.saleDate||''));
+  const gross=sold.reduce((s,it)=>s+num(it.salePrice),0);
+  const net=sold.reduce((s,it)=>s+(netProfit(it)||0),0);
+  const fees=sold.reduce((s,it)=>s+num(it.ebayFees)+num(it.otherFees),0);
+  const ship=sold.reduce((s,it)=>s+num(it.shipCost),0);
+  c.innerHTML=`
+  <div class="cards">
+    ${kpi('Gross',money0(gross),'','')}${kpi('Net profit',money0(net),net>=0?'pos':'neg','')}
+    ${kpi('Fees',money0(fees),'neg','')}${kpi('Shipping',money0(ship),'neg','')}
+  </div>
+  <div class="panel"><div class="panel-head"><h2>Sales (${sold.length})</h2></div><div class="tablewrap"><table>
+    <thead><tr><th>Item ID</th><th>Title</th><th>Acct</th><th>Marketplace</th><th>Sold</th>
+      <th class="num">Sale</th><th class="num">Fees</th><th class="num">Ship</th><th class="num">Cost</th><th class="num">Net</th><th class="num">ROI</th></tr></thead>
+    <tbody>${sold.map(it=>`<tr onclick="editItem('${it.id}')" style="cursor:pointer">
+      <td><strong>${esc(it.itemId||'—')}</strong></td><td>${esc(it.title||'')}</td>
+      <td><span class="acct-badge acct-${it.account}">${esc(acctName(it.account))}</span></td>
+      <td>${esc(it.marketplace||'eBay')}</td><td>${it.saleDate||'—'}</td>
+      <td class="num">${money(num(it.salePrice))}</td><td class="num neg">${money(num(it.ebayFees)+num(it.otherFees))}</td>
+      <td class="num neg">${money(num(it.shipCost))}</td><td class="num">${money(num(it.cost))}</td>
+      <td class="num ${netProfit(it)>=0?'pos':'neg'}">${money(netProfit(it))}</td><td class="num">${pct(roi(it))}</td></tr>`).join('')||emptyRow(11)}</tbody>
+  </table></div></div>`;
+}
+
+/* ---------------- Insights ---------------- */
+function renderInsights(c){
+  const sold=soldInRange();
+  const listed=acctItems().filter(it=>it.listedDate);
+  const avgTtl = avg(listed.map(it=>it.purchaseDate&&it.listedDate?daysBetween(it.purchaseDate,it.listedDate):null).filter(x=>x!=null));
+  const avgTts = avg(sold.map(it=>it.listedDate&&it.saleDate?daysBetween(it.listedDate,it.saleDate):null).filter(x=>x!=null));
+  // per-account comparison
+  const accts=DATA.settings.accounts;
+  const byAcct=accts.map(a=>{
+    const s=DATA.items.filter(it=>it.account===a.id&&isSold(it)&&inRange(it));
+    return {name:a.name, units:s.length, gross:s.reduce((x,it)=>x+num(it.salePrice),0), net:s.reduce((x,it)=>x+(netProfit(it)||0),0)};
+  });
+  // category performance
+  const cat={}; sold.forEach(it=>{const k=it.category||'Other'; cat[k]=cat[k]||{net:0,units:0}; cat[k].net+=(netProfit(it)||0); cat[k].units++;});
+  const catKeys=Object.keys(cat).sort((a,b)=>cat[b].net-cat[a].net);
+  const maxCat=Math.max(1,...catKeys.map(k=>Math.abs(cat[k].net)));
+  // top & worst items
+  const ranked=sold.slice().sort((a,b)=>(netProfit(b)||0)-(netProfit(a)||0));
+  c.innerHTML=`
+  <div class="cards">
+    ${kpi('Avg time to list',avgTtl==null?'—':avgTtl.toFixed(1)+' d','','purchase → listed')}
+    ${kpi('Avg time to sell',avgTts==null?'—':avgTts.toFixed(1)+' d','','listed → sold')}
+    ${kpi('Best ROI',bestRoi(sold),'pos','single item')}
+    ${kpi('Sell-through',sellThrough()+'%','','sold ÷ all items')}
+  </div>
+  <div class="grid2">
+    <div class="panel"><div class="panel-head"><h2>Net profit by category</h2></div><div class="panel-body">
+      <div class="bars">${catKeys.map(k=>`<div class="barrow"><div>${esc(k)} <span class="muted">(${cat[k].units})</span></div>
+        <div class="bar"><span style="width:${Math.abs(cat[k].net)/maxCat*100}%;background:${cat[k].net<0?'var(--red)':'var(--green)'}"></span></div>
+        <div class="right ${cat[k].net>=0?'pos':'neg'}">${money0(cat[k].net)}</div></div>`).join('')||'<div class="muted">No sales in range.</div>'}</div>
+    </div></div>
+    <div class="panel"><div class="panel-head"><h2>Account comparison</h2></div><div class="panel-body">
+      <table><thead><tr><th>Account</th><th class="num">Units</th><th class="num">Gross</th><th class="num">Net</th></tr></thead>
+      <tbody>${byAcct.map(a=>`<tr><td><strong>${esc(a.name)}</strong></td><td class="num">${a.units}</td><td class="num">${money0(a.gross)}</td><td class="num ${a.net>=0?'pos':'neg'}">${money0(a.net)}</td></tr>`).join('')}</tbody></table>
+    </div></div>
+  </div>
+  <div class="grid2">
+    <div class="panel"><div class="panel-head"><h2>Top performers</h2></div><div class="tablewrap"><table>
+      <thead><tr><th>Item ID</th><th>Title</th><th class="num">Net</th><th class="num">ROI</th></tr></thead>
+      <tbody>${ranked.slice(0,6).map(it=>`<tr><td><strong>${esc(it.itemId||'—')}</strong></td><td>${esc(it.title||'')}</td><td class="num pos">${money(netProfit(it))}</td><td class="num">${pct(roi(it))}</td></tr>`).join('')||emptyRow(4)}</tbody>
+    </table></div></div>
+    <div class="panel"><div class="panel-head"><h2>Worst performers</h2></div><div class="tablewrap"><table>
+      <thead><tr><th>Item ID</th><th>Title</th><th class="num">Net</th><th class="num">ROI</th></tr></thead>
+      <tbody>${ranked.slice(-6).reverse().map(it=>`<tr><td><strong>${esc(it.itemId||'—')}</strong></td><td>${esc(it.title||'')}</td><td class="num ${netProfit(it)>=0?'pos':'neg'}">${money(netProfit(it))}</td><td class="num">${pct(roi(it))}</td></tr>`).join('')||emptyRow(4)}</tbody>
+    </table></div></div>
+  </div>`;
+}
+function inRange(it){ const start=rangeStart(); return it.saleDate && (!start||it.saleDate>=start); }
+function avg(arr){ return arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:null; }
+function bestRoi(sold){ const rs=sold.map(roi).filter(x=>x!=null); return rs.length?pct(Math.max(...rs)):'—'; }
+function sellThrough(){ const all=acctItems().filter(it=>it.status!=='returned').length; const sold=acctItems().filter(isSold).length; return all?Math.round(sold/all*100):0; }
+
+/* ---------------- Aging ---------------- */
+function renderAging(c){
+  const unsold=acctItems().filter(it=>!isSold(it)&&it.status!=='returned');
+  const b90=unsold.filter(it=>daysInStock(it)>=90&&daysInStock(it)<180);
+  const b180=unsold.filter(it=>daysInStock(it)>=180&&daysInStock(it)<365);
+  const b365=unsold.filter(it=>daysInStock(it)>=365);
+  const fresh=unsold.filter(it=>daysInStock(it)<90);
+  const dead=[...b90,...b180,...b365].sort((a,b)=>daysInStock(b)-daysInStock(a));
+  c.innerHTML=`
+  <div class="note">Items are aged from purchase date. Flipwise-style thresholds: <strong>90 / 180 / 365 days</strong> unsold. Tied-up cash in slow stock: <strong>${money(dead.reduce((s,it)=>s+num(it.cost),0))}</strong>.</div>
+  <div class="agebucket" style="margin-bottom:22px">
+    <div class="b"><div class="n">${fresh.length}</div><div class="muted">Under 90 days</div></div>
+    <div class="b warn"><div class="n">${b90.length}</div><div class="muted">90–180 days</div></div>
+    <div class="b warn"><div class="n">${b180.length}</div><div class="muted">180–365 days</div></div>
+    <div class="b bad"><div class="n">${b365.length}</div><div class="muted">365+ days</div></div>
+  </div>
+  <div class="panel"><div class="panel-head"><h2>Slow movers (90+ days unsold)</h2></div><div class="tablewrap"><table>
+    <thead><tr><th>Item ID</th><th>Title</th><th>Acct</th><th>Location</th><th class="num">Cost</th><th>Status</th><th class="num">Days in stock</th></tr></thead>
+    <tbody>${dead.map(it=>`<tr onclick="editItem('${it.id}')" style="cursor:pointer">
+      <td><strong>${esc(it.itemId||'—')}</strong></td><td>${esc(it.title||'')}</td>
+      <td><span class="acct-badge acct-${it.account}">${esc(acctName(it.account))}</span></td>
+      <td>${esc(it.location||'—')}</td><td class="num">${money(num(it.cost))}</td>
+      <td><span class="status s-${it.status}">${cap(it.status)}</span></td>
+      <td class="num ${daysInStock(it)>=365?'neg':''}">${daysInStock(it)}</td></tr>`).join('')||`<tr><td colspan="7" class="muted" style="text-align:center;padding:30px">Nothing aging past 90 days. 🎉</td></tr>`}</tbody>
+  </table></div></div>`;
+}
+
+/* ---------------- Sourcing ---------------- */
+function renderSourcing(c){
+  const sold=soldInRange();
+  const by={};
+  sold.forEach(it=>{ const s=it.source||'Unknown'; by[s]=by[s]||{units:0,cost:0,net:0,gross:0}; by[s].units++; by[s].cost+=num(it.cost); by[s].net+=(netProfit(it)||0); by[s].gross+=num(it.salePrice); });
+  const keys=Object.keys(by).sort((a,b)=>by[b].net-by[a].net);
+  c.innerHTML=`
+  <div class="note">Which sourcing channels actually make money — ranked by net profit for the selected range and account.</div>
+  <div class="panel"><div class="tablewrap"><table>
+    <thead><tr><th>Source</th><th class="num">Units sold</th><th class="num">Spent (COGS)</th><th class="num">Gross</th><th class="num">Net profit</th><th class="num">Avg ROI</th></tr></thead>
+    <tbody>${keys.map(k=>{const r=by[k];const roiv=r.cost>0?r.net/r.cost*100:null;return `<tr>
+      <td><strong>${esc(k)}</strong></td><td class="num">${r.units}</td><td class="num">${money(r.cost)}</td>
+      <td class="num">${money(r.gross)}</td><td class="num ${r.net>=0?'pos':'neg'}">${money(r.net)}</td>
+      <td class="num ${roiv>=0?'pos':'neg'}">${pct(roiv)}</td></tr>`;}).join('')||emptyRow(6)}</tbody>
+  </table></div></div>`;
+}
+
+/* ---------------- Income statement ---------------- */
+function renderIncome(c){
+  const sold=soldInRange();
+  const revenue=sold.reduce((s,it)=>s+num(it.salePrice),0);
+  const refunds=sold.reduce((s,it)=>s+num(it.refund),0);
+  const cogs=sold.reduce((s,it)=>s+num(it.cost),0);
+  const fees=sold.reduce((s,it)=>s+num(it.ebayFees)+num(it.otherFees),0);
+  const ship=sold.reduce((s,it)=>s+num(it.shipCost),0);
+  const consign=sold.reduce((s,it)=>{if(it.consignPartner&&it.consignSplit)return s+(num(it.salePrice)-num(it.ebayFees)-num(it.otherFees)-num(it.shipCost))*(num(it.consignSplit)/100);return s;},0);
+  const net=revenue-refunds-cogs-fees-ship-consign;
+  const line=(l,v,neg,strong)=>`<tr${strong?' style="font-weight:800;border-top:2px solid var(--ink)"':''}><td>${l}</td><td class="num ${neg?'neg':''}">${neg&&v>0?'-':''}${money(v)}</td></tr>`;
+  c.innerHTML=`
+  <div class="note">Income statement for <strong>${rangeLabel()}</strong> · ${STATE.account==='all'?'all accounts':esc(acctName(STATE.account))}. Cash basis (recognized at sale date).</div>
+  <div class="panel" style="max-width:560px"><div class="panel-body"><table>
+    ${line('Gross revenue',revenue)}
+    ${line('Less: refunds',refunds,true)}
+    ${line('Less: cost of goods sold',cogs,true)}
+    ${line('Less: marketplace &amp; payment fees',fees,true)}
+    ${line('Less: shipping',ship,true)}
+    ${consign>0?line('Less: consignment payouts',consign,true):''}
+    ${line('Net profit',net,false,true)}
+  </table>
+  <div style="margin-top:16px"><button class="btn ghost sm" onclick="exportIncomeCSV()">⬇ Export CSV</button></div>
+  </div></div>`;
+}
+function rangeLabel(){ const o={'7':'last 7 days','30':'last 30 days','90':'last 90 days','365':'last 12 months','ytd':'year to date','all':'all time'}; return o[STATE.range]; }
+
+/* ---------------- Import / Export ---------------- */
+function renderData(c){
+  c.innerHTML=`
+  <div class="grid2">
+    <div class="panel"><div class="panel-head"><h2>GitHub sync (auto)</h2></div><div class="panel-body">
+      <p class="muted" style="margin-bottom:12px">Sync directly with <code>data.json</code> in your private repo — the eBay Action writes sales into it, you pull them here. Set your token/repo in Settings.</p>
+      <button class="btn" onclick="pullFromGitHub(false)">⬇ Pull from GitHub</button>
+      <button class="btn ghost" onclick="pushToGitHub()">⬆ Push to GitHub</button>
+      <div class="hint" style="margin-top:12px">Repo: <code>${esc(DATA.settings.ghRepo||'not set')}</code> · ${DATA.settings.ghToken?'token set ✓':'no token — add in Settings'} ${DATA.lastSync?'· last eBay sync '+esc((DATA.lastSync||'').slice(0,16).replace('T',' ')):''}</div>
+    </div></div>
+    <div class="panel"><div class="panel-head"><h2>Manual file export/import</h2></div><div class="panel-body">
+      <p class="muted" style="margin-bottom:12px">Prefer files? Export/import <code>data.json</code> by hand (e.g. via GitHub Desktop).</p>
+      <button class="btn ghost" onclick="exportJSON()">⬇ Export data.json</button>
+      <label class="btn ghost" style="cursor:pointer">⬆ Import data.json<input type="file" accept="application/json" style="display:none" onchange="importJSON(event)"></label>
+    </div></div>
+    <div class="panel"><div class="panel-head"><h2>eBay CSV import</h2></div><div class="panel-body">
+      <p class="muted" style="margin-bottom:12px">Import your eBay Seller Hub orders report (CSV). Columns are auto-detected; you'll confirm the mapping.</p>
+      <label class="btn" style="cursor:pointer">⬆ Choose CSV<input type="file" accept=".csv,text/csv" style="display:none" onchange="importCSV(event)"></label>
+      <select id="csvAcct" style="width:auto;display:inline-block;margin-left:8px">${DATA.settings.accounts.map(a=>`<option value="${a.id}">${esc(a.name)}</option>`).join('')}</select>
+      <div id="csvResult" class="hint" style="margin-top:12px"></div>
+    </div></div>
+  </div>
+  <div class="panel"><div class="panel-head"><h2>Sample data</h2></div><div class="panel-body">
+    <p class="muted" style="margin-bottom:12px">Load a realistic sample set (laptops + media across both accounts) to explore the app, or clear everything.</p>
+    <button class="btn ghost" onclick="loadSample()">Load sample data</button>
+    <button class="btn danger" onclick="clearAll()">Clear all data</button>
+  </div></div>`;
+}
+
+/* ---------------- Settings ---------------- */
+function renderSettings(c){
+  const s=DATA.settings;
+  c.innerHTML=`
+  <div class="grid2">
+    <div class="panel"><div class="panel-head"><h2>Accounts</h2></div><div class="panel-body">
+      ${s.accounts.map((a,i)=>`<div class="field" style="margin-bottom:12px"><label>Account ${a.id} name</label>
+        <input type="text" value="${esc(a.name)}" onchange="setAcctName('${a.id}',this.value)"></div>`).join('')}
+      <div class="field" style="margin-bottom:12px"><label>Account A default fee rate (%)</label><input type="number" step="0.01" value="${s.feeRateA}" onchange="DATA.settings.feeRateA=num(this.value);save()"></div>
+      <div class="field"><label>Account B default fee rate (%)</label><input type="number" step="0.01" value="${s.feeRateB}" onchange="DATA.settings.feeRateB=num(this.value);save()"></div>
+      <div class="hint">Fee rate auto-fills eBay fees when you enter a sale price and leave fees blank.</div>
+    </div></div>
+    <div class="panel"><div class="panel-head"><h2>Lists</h2></div><div class="panel-body">
+      ${listEditor('Categories','categories')}
+      ${listEditor('Locations','locations')}
+      ${listEditor('Sources','sources')}
+      ${listEditor('Custom fields','customFields')}
+    </div></div>
+  </div>
+  <div class="panel"><div class="panel-head"><h2>GitHub data sync</h2></div><div class="panel-body">
+    <div class="note">Syncs <code>data.json</code> with your private repo so all your computers stay in step. The token is stored only in this browser and is never written into the repo file. Use a <strong>fine-grained token</strong> scoped to just this repo with <strong>Contents: Read &amp; write</strong>.</div>
+    <div class="form-grid">
+      <div class="field"><label>Repo (owner/name)</label><input type="text" value="${esc(s.ghRepo||'')}" onchange="DATA.settings.ghRepo=this.value.trim();save()"></div>
+      <div class="field"><label>Branch</label><input type="text" value="${esc(s.ghBranch||'main')}" onchange="DATA.settings.ghBranch=this.value.trim();save()"></div>
+      <div class="field full"><label>GitHub token (fine-grained, Contents: Read &amp; write)</label><input type="password" placeholder="github_pat_..." value="${esc(s.ghToken||'')}" onchange="DATA.settings.ghToken=this.value.trim();save()"></div>
+      <div class="field"><label>Auto-pull on open</label><select onchange="DATA.settings.ghAutoPull=this.value==='yes';save()"><option value="yes" ${s.ghAutoPull?'selected':''}>Yes</option><option value="no" ${!s.ghAutoPull?'selected':''}>No</option></select></div>
+    </div>
+    <div style="margin-top:12px"><button class="btn" onclick="pullFromGitHub(false)">⬇ Pull now</button> <button class="btn ghost" onclick="pushToGitHub()">⬆ Push now</button></div>
+  </div>
+  <div class="panel"><div class="panel-head"><h2>eBay live sync (both accounts)</h2></div><div class="panel-body">
+    <div class="note">Live sync runs via a <strong>GitHub Action</strong> using your eBay developer keyset — no third-party host, secrets stay in GitHub. Enter a keyset per account below (stored locally). The Action does the OAuth token exchange and writes sales into <code>data.json</code>. See setup steps beneath.</div>
+    ${s.accounts.map(a=>`<div style="border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px">
+      <strong>${esc(a.name)} (${a.id})</strong>
+      <div class="form-grid" style="margin-top:10px">
+        <div class="field"><label>App ID (Client ID)</label><input type="text" placeholder="Your-App-XXXX" value="${esc((s['ebay_'+a.id]||{}).appId||'')}" onchange="setEbay('${a.id}','appId',this.value)"></div>
+        <div class="field"><label>Cert ID (Client Secret) — kept in GitHub Secrets, not here</label><input type="text" placeholder="stored in repo secrets" disabled></div>
+        <div class="field"><label>Dev ID</label><input type="text" value="${esc((s['ebay_'+a.id]||{}).devId||'')}" onchange="setEbay('${a.id}','devId',this.value)"></div>
+        <div class="field"><label>Status</label><input type="text" value="Not connected — CSV import active" disabled></div>
+      </div></div>`).join('')}
+    <div style="margin-top:6px">
+      <strong>Setup (one-time, per account):</strong>
+      <ol class="steps" style="margin-top:8px">
+        <li>Create a free eBay developer account at developer.ebay.com and make a keyset.</li>
+        <li>Opt out of "marketplace account deletion" notifications to enable production keys.</li>
+        <li>Put the Cert ID (secret) in your repo's <code>Settings → Secrets → Actions</code>.</li>
+        <li>Run the OAuth authorize link once per account; paste the returned code so the Action can mint a refresh token.</li>
+        <li>The scheduled Action pulls Fulfillment + Finances data hourly into <code>data.json</code>.</li>
+      </ol>
+    </div>
+  </div></div>`;
+}
+function listEditor(label,key){
+  return `<div class="field" style="margin-bottom:14px"><label>${label}</label>
+    <textarea rows="2" onchange="DATA.settings['${key}']=this.value.split(',').map(x=>x.trim()).filter(Boolean);save();buildAcctSwitch()">${(DATA.settings[key]||[]).join(', ')}</textarea>
+    <div class="hint">Comma-separated.</div></div>`;
+}
+function setAcctName(id,v){ const a=DATA.settings.accounts.find(x=>x.id===id); if(a){a.name=v; save(); buildAcctSwitch();} }
+function setEbay(id,field,v){ const k='ebay_'+id; DATA.settings[k]=DATA.settings[k]||{}; DATA.settings[k][field]=v; save(); }
+
+/* ---------------- Item modal ---------------- */
+function fieldHTML(id,label,type,val,opts){
+  if(type==='select') return `<div class="field"><label>${label}</label><select id="f_${id}">${opts.map(o=>`<option ${val===o?'selected':''}>${esc(o)}</option>`).join('')}</select></div>`;
+  if(type==='textarea') return `<div class="field full"><label>${label}</label><textarea id="f_${id}" rows="2">${esc(val||'')}</textarea></div>`;
+  return `<div class="field"><label>${label}</label><input id="f_${id}" type="${type}" value="${esc(val==null?'':val)}"></div>`;
+}
+function openItemModal(it){
+  STATE.editingId=it?it.id:null;
+  document.getElementById('modalTitle').textContent = it?'Edit item':'Add item';
+  document.getElementById('delBtn').style.display = it?'inline-flex':'none';
+  const s=DATA.settings; it=it||{account:STATE.account==='all'?'A':STATE.account,status:'sourced',purchaseDate:todayISO()};
+  const f=document.getElementById('itemForm');
+  f.innerHTML=
+    fieldHTML('itemId','Item ID','text',it.itemId)+
+    fieldHTML('title','Title','text',it.title)+
+    fieldHTML('account','Account','select',it.account? (s.accounts.find(a=>a.id===it.account)||{}).name : s.accounts[0].name, s.accounts.map(a=>a.name))+
+    fieldHTML('category','Category','select',it.category||s.categories[0],s.categories)+
+    fieldHTML('location','Location','select',it.location||s.locations[0],s.locations)+
+    fieldHTML('source','Source','select',it.source||s.sources[0],s.sources)+
+    fieldHTML('cost','Cost ($)','number',it.cost)+
+    fieldHTML('purchaseDate','Purchase date','date',it.purchaseDate)+
+    fieldHTML('status','Status','select',it.status,['sourced','listed','sold','shipped','returned'])+
+    fieldHTML('listedDate','Listed date','date',it.listedDate)+
+    fieldHTML('marketplace','Marketplace','select',it.marketplace||s.marketplaces[0],s.marketplaces)+
+    fieldHTML('salePrice','Sale price ($)','number',it.salePrice)+
+    fieldHTML('saleDate','Sale date','date',it.saleDate)+
+    fieldHTML('ebayFees','Marketplace fees ($)','number',it.ebayFees)+
+    fieldHTML('shipCost','Shipping cost ($)','number',it.shipCost)+
+    fieldHTML('otherFees','Other fees ($)','number',it.otherFees)+
+    fieldHTML('refund','Refund ($)','number',it.refund)+
+    fieldHTML('consignPartner','Consignment partner','text',it.consignPartner)+
+    fieldHTML('consignSplit','Consignment split (%)','number',it.consignSplit)+
+    fieldHTML('tags','Tags (comma-sep)','text',(it.tags||[]).join(', '))+
+    s.customFields.map(cf=>fieldHTML('cf_'+cf.replace(/\W/g,'_'),cf,'text',(it.custom||{})[cf])).join('')+
+    fieldHTML('notes','Notes','textarea',it.notes);
+  document.getElementById('overlay').classList.add('open');
+}
+function readForm(){
+  const g=id=>{const el=document.getElementById('f_'+id);return el?el.value:'';};
+  const s=DATA.settings;
+  const acctName=g('account'); const acct=(s.accounts.find(a=>a.name===acctName)||s.accounts[0]).id;
+  const custom={}; s.customFields.forEach(cf=>{const v=g('cf_'+cf.replace(/\W/g,'_')); if(v)custom[cf]=v;});
+  let ebayFees=g('ebayFees');
+  const salePrice=num(g('salePrice'));
+  if((ebayFees===''||ebayFees==null) && salePrice>0){ const rate=acct==='A'?s.feeRateA:s.feeRateB; ebayFees=(salePrice*rate/100).toFixed(2); }
+  return {
+    itemId:g('itemId'),title:g('title'),account:acct,category:g('category'),location:g('location'),source:g('source'),
+    cost:num(g('cost')),purchaseDate:g('purchaseDate'),status:g('status'),listedDate:g('listedDate'),marketplace:g('marketplace'),
+    salePrice:salePrice||'',saleDate:g('saleDate'),ebayFees:num(ebayFees)||'',shipCost:num(g('shipCost'))||'',otherFees:num(g('otherFees'))||'',
+    refund:num(g('refund'))||'',consignPartner:g('consignPartner'),consignSplit:num(g('consignSplit'))||'',
+    tags:g('tags').split(',').map(x=>x.trim()).filter(Boolean),custom,notes:g('notes')
+  };
+}
+function saveItem(){
+  const data=readForm();
+  if(STATE.editingId){ const it=DATA.items.find(x=>x.id===STATE.editingId); Object.assign(it,data); }
+  else { data.id=uid(); if(!data.itemId) data.itemId=autoId(data.account); DATA.items.push(data); }
+  save(); closeModal(); render();
+}
+function autoId(acct){ const n=DATA.items.filter(i=>i.account===acct).length+1; return acct+'-'+String(n).padStart(3,'0'); }
+function deleteCurrent(){ if(STATE.editingId && confirm('Delete this item?')){ DATA.items=DATA.items.filter(x=>x.id!==STATE.editingId); save(); closeModal(); render(); } }
+function editItem(id){ openItemModal(DATA.items.find(x=>x.id===id)); }
+function newItem(){ openItemModal(null); }
+function closeModal(){ document.getElementById('overlay').classList.remove('open'); STATE.editingId=null; }
+
+/* ---------------- Import/export actions ---------------- */
+function exportJSON(){ downloadFile('data.json', JSON.stringify(DATA,null,2), 'application/json'); }
+function importJSON(e){ const file=e.target.files[0]; if(!file)return; const r=new FileReader(); r.onload=()=>{ try{ DATA=migrate(JSON.parse(r.result)); save(); buildAcctSwitch(); render(); alert('Data imported.'); }catch(err){ alert('Invalid JSON file.'); } }; r.readAsText(file); }
+function exportIncomeCSV(){
+  const sold=soldInRange();
+  const rows=[['Item ID','Title','Account','Marketplace','Sale date','Sale price','Refund','COGS','Fees','Shipping','Net']];
+  sold.forEach(it=>rows.push([it.itemId,it.title,acctName(it.account),it.marketplace||'eBay',it.saleDate,num(it.salePrice),num(it.refund),num(it.cost),num(it.ebayFees)+num(it.otherFees),num(it.shipCost),netProfit(it)]));
+  downloadFile('income.csv', rows.map(r=>r.map(csvCell).join(',')).join('\n'), 'text/csv');
+}
+function csvCell(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
+function downloadFile(name,content,type){ const b=new Blob([content],{type}); const u=URL.createObjectURL(b); const a=document.createElement('a'); a.href=u; a.download=name; a.click(); URL.revokeObjectURL(u); }
+
+function importCSV(e){
+  const file=e.target.files[0]; if(!file)return; const acct=document.getElementById('csvAcct').value;
+  const r=new FileReader(); r.onload=()=>{ const added=parseEbayCSV(r.result,acct); save(); render(); const el=document.getElementById('csvResult'); if(el)el.innerHTML=`Imported <strong>${added}</strong> orders into ${esc(acctName(acct))}.`; };
+  r.readAsText(file);
+}
+function parseEbayCSV(text,acct){
+  const lines=text.split(/\r?\n/).filter(l=>l.trim()); if(!lines.length)return 0;
+  const rows=lines.map(parseCSVLine);
+  let hi=rows.findIndex(r=>r.some(c=>/item\s*number|item\s*id|sold\s*for|sale\s*price|title/i.test(c)));
+  if(hi<0)hi=0;
+  const header=rows[hi].map(h=>h.toLowerCase().trim());
+  const col=(...names)=>{ for(const n of names){ const i=header.findIndex(h=>h.includes(n)); if(i>=0)return i; } return -1; };
+  const ci={ id:col('item number','item id','custom label','sku'), title:col('title','item title'),
+    price:col('sold for','sale price','sold price','total price'), date:col('sale date','date sold','order date','paid on'),
+    fees:col('final value fee','fee','ebay collected'), ship:col('shipping','postage') };
+  let added=0;
+  for(let i=hi+1;i<rows.length;i++){
+    const r=rows[i]; if(!r||r.length<2)continue;
+    const price=parseMoney(r[ci.price]); if(!price)continue;
+    DATA.items.push({ id:uid(), itemId:(ci.id>=0?r[ci.id]:'')||autoId(acct), title:(ci.title>=0?r[ci.title]:'')||'Imported item',
+      account:acct, category:'Other', location:'', source:'eBay import', cost:0,
+      purchaseDate:'', status:'sold', marketplace:'eBay',
+      salePrice:price, saleDate:normDate(ci.date>=0?r[ci.date]:'')||todayISO(),
+      ebayFees:parseMoney(ci.fees>=0?r[ci.fees]:0), shipCost:parseMoney(ci.ship>=0?r[ci.ship]:0),
+      otherFees:'',refund:'',tags:['imported'],custom:{},notes:'' });
+    added++;
+  }
+  return added;
+}
+function parseCSVLine(line){ const out=[];let cur='';let q=false; for(let i=0;i<line.length;i++){const c=line[i]; if(q){ if(c==='"'){ if(line[i+1]==='"'){cur+='"';i++;}else q=false; } else cur+=c; } else { if(c==='"')q=true; else if(c===','){out.push(cur);cur='';} else cur+=c; } } out.push(cur); return out; }
+function parseMoney(v){ if(v==null)return 0; const n=parseFloat(String(v).replace(/[^0-9.\-]/g,'')); return isNaN(n)?0:n; }
+function normDate(v){ if(!v)return ''; const d=new Date(v); return isNaN(d)?'':d.toISOString().slice(0,10); }
+
+/* ---------------- Sample + clear ---------------- */
+function loadSample(){
+  const S=[
+    ['LP-001','ThinkPad T480 (i5, 16GB)','A','Laptop','Shelf A','Goodwill',95,'2026-03-02','sold','2026-03-10','eBay',285,'2026-03-24',37.8,18,'',''],
+    ['LP-002','Dell XPS 13 9370','A','Laptop','Shelf A','Estate sale',120,'2026-03-14','sold','2026-03-20','eBay',340,'2026-04-05',45.1,22,'',''],
+    ['LP-003','MacBook Air 2017 (screen fix)','A','Laptop','Bin 1','Facebook Marketplace',140,'2026-02-01','sold','2026-02-15','eBay',430,'2026-03-01',57,25,'',''],
+    ['LP-004','HP EliteBook 840 G5','B','Laptop','Shelf B','Auction',80,'2026-04-10','listed','2026-04-18','eBay','','','','','',''],
+    ['LP-005','Lenovo Yoga (no SSD)','B','Laptop','Bin 2','Goodwill',60,'2026-01-05','sold','2026-01-12','eBay',210,'2026-01-20',27.8,15,'',''],
+    ['LP-006','ThinkPad X1 Carbon G6','A','Laptop','Shelf A','Wholesale',175,'2026-05-01','sourced','','eBay','','','','','',''],
+    ['MD-001','Miles Davis — Kind of Blue SACD','B','Music CD','Bin 1','Estate sale',3,'2026-04-02','sold','2026-04-09','eBay',34,'2026-04-14',4.5,4,'',''],
+    ['MD-002','Fleetwood Mac — Rumours (vinyl)','B','Vinyl','Bin 2','Yard sale',2,'2026-03-20','sold','2026-04-01','eBay',28,'2026-04-06',3.7,5,'',''],
+    ['MD-003','Pink Floyd — DSOTM box set','B','Vinyl','Storage','Facebook Marketplace',15,'2025-12-10','listed','2026-01-02','eBay','','','','','',''],
+    ['VD-001','Criterion Blade Runner DVD','A','DVD','Bin 1','Goodwill',1,'2025-11-15','sourced','','eBay','','','','','',''],
+    ['MD-004','Coltrane — A Love Supreme CD','B','Music CD','Bin 1','Auction',4,'2026-02-11','sold','2026-02-14','eBay',22,'2026-02-22',2.9,4,'',''],
+    ['LP-007','Acer Aspire (bad RAM)','A','Laptop','Bin 2','Goodwill',35,'2026-05-20','listed','2026-05-25','eBay','','','','','','']
+  ];
+  DATA.items = S.map(a=>({id:uid(),itemId:a[0],title:a[1],account:a[2],category:a[3],location:a[4],source:a[5],cost:a[6],purchaseDate:a[7],status:a[8],listedDate:a[9],marketplace:a[10],salePrice:a[11],saleDate:a[12],ebayFees:a[13],shipCost:a[14],otherFees:a[15],refund:a[16],tags:[],custom:{},notes:''}));
+  save(); STATE.range='all'; document.getElementById('rangeSel').value='all'; render(); alert('Sample data loaded.');
+}
+function clearAll(){ if(confirm('Delete ALL items? This cannot be undone.')){ DATA.items=[]; save(); render(); } }
+
+/* ---------------- Helpers + wiring ---------------- */
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function cap(s){ return s?s.charAt(0).toUpperCase()+s.slice(1):''; }
+function go(v){ STATE.view=v; render(); }
+function buildAcctSwitch(){
+  const el=document.getElementById('acctSwitch');
+  const opts=[{id:'all',name:'All'}].concat(DATA.settings.accounts.map(a=>({id:a.id,name:a.name})));
+  el.innerHTML=opts.map(o=>`<button class="${STATE.account===o.id?'active':''}" onclick="setAccount('${o.id}')">${esc(o.name)}</button>`).join('');
+}
+function setAccount(id){ STATE.account=id; buildAcctSwitch(); render(); }
+
+document.getElementById('nav').addEventListener('click',e=>{ const a=e.target.closest('a'); if(a){STATE.view=a.dataset.view; render();} });
+document.getElementById('rangeSel').addEventListener('change',e=>{STATE.range=e.target.value; render();});
+document.getElementById('quickAdd').addEventListener('click',()=>newItem());
+document.getElementById('overlay').addEventListener('click',e=>{ if(e.target.id==='overlay')closeModal(); });
+
+buildAcctSwitch();
+render();
+if(DATA.settings.ghAutoPull && DATA.settings.ghToken){ pullFromGitHub(true); }
+</script>
+</body>
+</html>
