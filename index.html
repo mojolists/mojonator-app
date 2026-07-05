@@ -134,7 +134,8 @@
     <div class="brand"><span class="dot">$</span> Mojonator</div>
     <nav class="nav" id="nav">
       <a data-view="dashboard" class="active"><span class="ic">◧</span> Dashboard</a>
-      <a data-view="inventory"><span class="ic">▦</span> Inventory</a>
+      <a data-view="listed"><span class="ic">▦</span> Listed</a>
+      <a data-view="unlisted"><span class="ic">◰</span> Unlisted</a>
       <a data-view="sales"><span class="ic">◆</span> Sales</a>
       <a data-view="insights"><span class="ic">◔</span> Insights</a>
       <a data-view="aging"><span class="ic">⏱</span> Aging</a>
@@ -323,13 +324,13 @@ function soldInRange(){
 function acctName(id){ const a=DATA.settings.accounts.find(x=>x.id===id); return a?a.name:id; }
 
 /* ---------------- Render router ---------------- */
-const TITLES={dashboard:'Dashboard',inventory:'Inventory',sales:'Sales',insights:'Insights',aging:'Inventory aging',sourcing:'Sourcing report',income:'Income statement',data:'Import / Export',settings:'Settings'};
+const TITLES={dashboard:'Dashboard',listed:'Listed inventory',unlisted:'Unlisted (on hand)',sales:'Sales',insights:'Insights',aging:'Inventory aging',sourcing:'Sourcing report',income:'Income statement',data:'Import / Export',settings:'Settings'};
 function render(){
   document.getElementById('viewTitle').textContent = TITLES[STATE.view];
   document.querySelectorAll('#nav a').forEach(a=>a.classList.toggle('active',a.dataset.view===STATE.view));
   const c=document.getElementById('content');
   destroyCharts();
-  ({dashboard:renderDashboard,inventory:renderInventory,sales:renderSales,insights:renderInsights,
+  ({dashboard:renderDashboard,listed:renderListed,unlisted:renderUnlisted,sales:renderSales,insights:renderInsights,
     aging:renderAging,sourcing:renderSourcing,income:renderIncome,data:renderData,settings:renderSettings}[STATE.view])(c);
 }
 function destroyCharts(){ Object.values(charts).forEach(ch=>{try{ch.destroy()}catch(e){}}); charts={}; }
@@ -395,50 +396,66 @@ function drawSource(sold){
 }
 function chartOpts(noLegend){ return {responsive:true,maintainAspectRatio:false,plugins:{legend:{display:!noLegend,position:'bottom'}},scales:{y:{ticks:{callback:v=>'$'+v}}}}; }
 
-/* ---------------- Inventory ---------------- */
-function renderInventory(c){
-  const q=STATE.invFilter.toLowerCase();
-  let items=acctItems().filter(it=>{
-    if(STATE.invStatus && STATE.invStatus!=='all' && it.status!==STATE.invStatus) return false;
-    if(!q) return true;
-    return [it.itemId,it.title,it.location,it.source,it.category,(it.tags||[]).join(' ')].join(' ').toLowerCase().includes(q);
-  });
-  items=sortItems(items);
+/* ---------------- Listed / Unlisted inventory ---------------- */
+function isUnsold(it){ return it.status!=='sold' && it.status!=='shipped' && it.status!=='returned'; }
+function daysSince(d){ return d ? Math.max(0, daysBetween(d, todayISO())) : 0; }
+function invSearchMatch(it,q){ return !q || [it.itemId,it.title,it.location,it.source,it.category,(it.tags||[]).join(' ')].join(' ').toLowerCase().includes(q); }
+
+function renderListed(c){
+  const q=(STATE.invFilter||'').toLowerCase();
+  let items=sortItems(acctItems().filter(it=> it.status==='listed' && invSearchMatch(it,q)));
   c.innerHTML=`
+  <div class="note">Items currently live on eBay (pulled from your active listings). When one sells, it moves to <strong>Sales</strong> automatically — nothing to do.</div>
   <div class="toolbar">
-    <input class="grow" type="text" id="invSearch" placeholder="Search item ID, title, location, tag…" value="${esc(STATE.invFilter)}">
-    <select id="invStatusSel" style="width:150px">
-      <option value="all">All statuses</option>
-      ${['sourced','listed','sold','shipped','returned'].map(s=>`<option value="${s}" ${STATE.invStatus===s?'selected':''}>${cap(s)}</option>`).join('')}
-    </select>
+    <input class="grow" type="text" id="invSearch" placeholder="Search title, item ID, location…" value="${esc(STATE.invFilter||'')}">
     <button class="btn" onclick="newItem()">＋ Add item</button>
   </div>
   <div class="panel"><div class="tablewrap"><table>
-    <thead><tr>
-      ${th('itemId','Item ID')}${th('title','Title')}${th('category','Category')}
-      <th>Acct</th>${th('location','Location')}${th('source','Source')}
-      ${th('cost','Cost','num')}${th('purchaseDate','Purchased','num')}
-      ${th('_days','Days','num')}<th>Status</th>${th('_net','Net','num')}${th('_roi','ROI','num')}<th></th>
-    </tr></thead>
-    <tbody>${items.map(rowInv).join('')||emptyRow(12)}</tbody>
+    <thead><tr>${th('itemId','Item ID')}${th('title','Title')}<th>Acct</th>${th('category','Category')}${th('location','Location')}${th('cost','Cost','num')}${th('askingPrice','Asking','num')}${th('listedDate','Listed','num')}<th class="num">Days</th><th></th></tr></thead>
+    <tbody>${items.map(rowListed).join('')||emptyRow(10,'Nothing listed yet. Connect eBay or add an item.')}</tbody>
   </table></div></div>
-  <div class="muted" style="margin-top:10px">${items.length} item(s) · ${money(items.reduce((s,it)=>s+num(it.cost),0))} total cost</div>`;
-  document.getElementById('invSearch').addEventListener('input',e=>{STATE.invFilter=e.target.value; renderInventory(c);});
-  document.getElementById('invStatusSel').addEventListener('change',e=>{STATE.invStatus=e.target.value; renderInventory(c);});
+  <div class="muted" style="margin-top:10px">${items.length} listed · ${money(items.reduce((s,it)=>s+num(it.cost),0))} cost tied up · ${money(items.reduce((s,it)=>s+num(it.askingPrice),0))} asking</div>`;
+  const si=document.getElementById('invSearch'); if(si) si.addEventListener('input',e=>{STATE.invFilter=e.target.value; renderListed(c);});
 }
-function rowInv(it){
-  const n=netProfit(it);
+function rowListed(it){
+  return `<tr>
+    <td onclick="editItem('${it.id}')" style="cursor:pointer"><strong>${esc(it.itemId||'—')}</strong></td>
+    <td onclick="editItem('${it.id}')" style="cursor:pointer">${esc(it.title||'')}</td>
+    <td><span class="acct-badge acct-${it.account}">${esc(acctName(it.account))}</span></td>
+    <td>${esc(it.category||'—')}</td><td>${esc(it.location||'—')}</td>
+    <td class="num">${it.cost?money(num(it.cost)):'—'}</td>
+    <td class="num">${it.askingPrice?money(num(it.askingPrice)):'—'}</td>
+    <td class="num">${it.listedDate||'—'}</td>
+    <td class="num">${daysSince(it.listedDate)}</td>
+    <td class="row-actions"><button class="icon-btn" onclick="editItem('${it.id}')">Edit</button></td>
+  </tr>`;
+}
+
+function renderUnlisted(c){
+  const q=(STATE.invFilter||'').toLowerCase();
+  let items=sortItems(acctItems().filter(it=> isUnsold(it) && it.status!=='listed' && invSearchMatch(it,q)));
+  c.innerHTML=`
+  <div class="note">Stock you have on hand but haven't listed yet (the "death pile"). Log items here the moment you buy them; once you list them on eBay they move to <strong>Listed</strong>.</div>
+  <div class="toolbar">
+    <input class="grow" type="text" id="invSearch" placeholder="Search title, item ID, location…" value="${esc(STATE.invFilter||'')}">
+    <button class="btn" onclick="newItem()">＋ Add item</button>
+  </div>
+  <div class="panel"><div class="tablewrap"><table>
+    <thead><tr>${th('itemId','Item ID')}${th('title','Title')}<th>Acct</th>${th('category','Category')}${th('location','Location')}${th('source','Source')}${th('cost','Cost','num')}${th('purchaseDate','Sourced','num')}<th class="num">Days held</th><th></th></tr></thead>
+    <tbody>${items.map(rowUnlisted).join('')||emptyRow(10,'No on-hand items. Click Add item to log something you sourced.')}</tbody>
+  </table></div></div>
+  <div class="muted" style="margin-top:10px">${items.length} on hand · ${money(items.reduce((s,it)=>s+num(it.cost),0))} cost tied up</div>`;
+  const si=document.getElementById('invSearch'); if(si) si.addEventListener('input',e=>{STATE.invFilter=e.target.value; renderUnlisted(c);});
+}
+function rowUnlisted(it){
   return `<tr>
     <td onclick="editItem('${it.id}')" style="cursor:pointer"><strong>${esc(it.itemId||'—')}</strong></td>
     <td onclick="editItem('${it.id}')" style="cursor:pointer">${esc(it.title||'')} ${(it.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</td>
-    <td>${esc(it.category||'—')}</td>
     <td><span class="acct-badge acct-${it.account}">${esc(acctName(it.account))}</span></td>
-    <td>${esc(it.location||'—')}</td><td>${esc(it.source||'—')}</td>
-    <td class="num">${money(num(it.cost))}</td><td class="num">${it.purchaseDate||'—'}</td>
+    <td>${esc(it.category||'—')}</td><td>${esc(it.location||'—')}</td><td>${esc(it.source||'—')}</td>
+    <td class="num">${it.cost?money(num(it.cost)):'—'}</td>
+    <td class="num">${it.purchaseDate||'—'}</td>
     <td class="num">${daysInStock(it)}</td>
-    <td><span class="status s-${it.status}">${cap(it.status)}</span></td>
-    <td class="num ${n>=0?'pos':'neg'}">${n==null?'—':money(n)}</td>
-    <td class="num">${pct(roi(it))}</td>
     <td class="row-actions"><button class="icon-btn" onclick="editItem('${it.id}')">Edit</button></td>
   </tr>`;
 }
@@ -449,7 +466,7 @@ function sortItems(items){
 }
 function th(key,label,cls){ const active=STATE.sort.key===key; const arrow=active?(STATE.sort.dir>0?' ▲':' ▼'):''; return `<th class="${cls||''}" onclick="setSort('${key}')">${label}${arrow}</th>`; }
 function setSort(k){ if(STATE.sort.key===k)STATE.sort.dir*=-1; else STATE.sort={key:k,dir:1}; render(); }
-function emptyRow(cols){ return `<tr><td colspan="${cols}" class="empty"><div class="big">▦</div>No items yet. Click <strong>Add item</strong> or load sample data in Import / Export.</td></tr>`; }
+function emptyRow(cols,msg){ return `<tr><td colspan="${cols}" class="empty"><div class="big">▦</div>${msg||'No items yet. Click <strong>Add item</strong> or load sample data in Import / Export.'}</td></tr>`; }
 
 /* ---------------- Sales ---------------- */
 function renderSales(c){
@@ -710,6 +727,7 @@ function openItemModal(it){
     fieldHTML('purchaseDate','Purchase date','date',it.purchaseDate)+
     fieldHTML('status','Status','select',it.status,['sourced','listed','sold','shipped','returned'])+
     fieldHTML('listedDate','Listed date','date',it.listedDate)+
+    fieldHTML('askingPrice','Asking price ($)','number',it.askingPrice)+
     fieldHTML('marketplace','Marketplace','select',it.marketplace||s.marketplaces[0],s.marketplaces)+
     fieldHTML('salePrice','Sale price ($)','number',it.salePrice)+
     fieldHTML('saleDate','Sale date','date',it.saleDate)+
@@ -734,7 +752,7 @@ function readForm(){
   if((ebayFees===''||ebayFees==null) && salePrice>0){ const rate=acct==='A'?s.feeRateA:s.feeRateB; ebayFees=(salePrice*rate/100).toFixed(2); }
   return {
     itemId:g('itemId'),title:g('title'),account:acct,category:g('category'),location:g('location'),source:g('source'),
-    cost:num(g('cost')),purchaseDate:g('purchaseDate'),status:g('status'),listedDate:g('listedDate'),marketplace:g('marketplace'),
+    cost:num(g('cost')),purchaseDate:g('purchaseDate'),status:g('status'),listedDate:g('listedDate'),askingPrice:num(g('askingPrice'))||'',marketplace:g('marketplace'),
     salePrice:salePrice||'',saleDate:g('saleDate'),ebayFees:num(ebayFees)||'',shipCost:num(g('shipCost'))||'',otherFees:num(g('otherFees'))||'',
     refund:num(g('refund'))||'',consignPartner:g('consignPartner'),consignSplit:num(g('consignSplit'))||'',
     tags:g('tags').split(',').map(x=>x.trim()).filter(Boolean),custom,notes:g('notes')
