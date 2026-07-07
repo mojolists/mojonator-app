@@ -86,7 +86,12 @@
   .acct-B{background:#fef9c3;color:#854d0e}
 
   .tablewrap{overflow-x:auto}
-  .cell-title{max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tablewrap::-webkit-scrollbar{height:14px}
+  .tablewrap::-webkit-scrollbar-track{background:#eef2f7;border-radius:7px}
+  .tablewrap::-webkit-scrollbar-thumb{background:#9aa7b5;border-radius:7px;border:3px solid #eef2f7}
+  .tablewrap::-webkit-scrollbar-thumb:hover{background:#6b7a89}
+  .cell-title{max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  table th, table td{white-space:nowrap}
   .muted{color:var(--muted)}
   .right{text-align:right}
   .pos{color:var(--green)} .neg{color:var(--red)}
@@ -225,7 +230,7 @@ function save(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(DATA)); }catch
 /* Repo data.json is the source of truth. The GitHub Action writes eBay
    sales into it server-side; the app pulls it, you add costs, you push. */
 const EBAY_FIELDS = ['title','salePrice','saleDate','ebayFees','shipCost','status','marketplace','ebayItemId'];
-const MANUAL_FIELDS = ['cost','source','location','category','purchaseDate','tags','custom','notes','consignPartner','consignSplit','itemId','listedDate','refund','otherFees'];
+const MANUAL_FIELDS = ['cost','source','location','category','purchaseDate','tags','custom','notes','consignPartner','consignSplit','itemId','sku','listedDate','refund','otherFees'];
 function b64encode(s){ return btoa(unescape(encodeURIComponent(s))); }
 function b64decode(s){ return decodeURIComponent(escape(atob(s.replace(/\s/g,'')))); }
 function ghHeaders(){ const t=DATA.settings.ghToken; return t?{Authorization:'Bearer '+t,Accept:'application/vnd.github+json'}:{Accept:'application/vnd.github+json'}; }
@@ -400,7 +405,7 @@ function chartOpts(noLegend){ return {responsive:true,maintainAspectRatio:false,
 /* ---------------- Listed / Unlisted inventory ---------------- */
 function isUnsold(it){ return it.status!=='sold' && it.status!=='shipped' && it.status!=='returned'; }
 function daysSince(d){ return d ? Math.max(0, daysBetween(d, todayISO())) : 0; }
-function invSearchMatch(it,q){ return !q || [it.itemId,it.title,it.location,it.source,it.category,(it.tags||[]).join(' ')].join(' ').toLowerCase().includes(q); }
+function invSearchMatch(it,q){ return !q || [it.sku,it.itemId,it.title,it.location,it.source,it.category,(it.tags||[]).join(' ')].join(' ').toLowerCase().includes(q); }
 
 function renderListed(c){
   const q=(STATE.invFilter||'').toLowerCase();
@@ -412,20 +417,24 @@ function renderListed(c){
     <button class="btn" onclick="newItem()">＋ Add item</button>
   </div>
   <div class="panel"><div class="tablewrap"><table>
-    <thead><tr>${th('itemId','Item ID')}${th('title','Title')}<th>Acct</th>${th('category','Category')}${th('location','Location')}${th('cost','Cost','num')}${th('askingPrice','Asking','num')}${th('listedDate','Listed','num')}<th class="num">Days</th><th></th></tr></thead>
-    <tbody>${items.map(rowListed).join('')||emptyRow(10,'Nothing listed yet. Connect eBay or add an item.')}</tbody>
+    <thead><tr>${th('sku','Custom SKU')}${th('itemId','Item ID')}${th('title','Title')}<th>Acct</th>${th('cost','Purchase $','num')}${th('source','Purchased at')}${th('purchaseDate','Purchased','num')}${th('askingPrice','Asking','num')}${th('location','Location')}${th('category','Category')}${th('listedDate','Listed','num')}<th class="num">Days</th><th></th></tr></thead>
+    <tbody>${items.map(rowListed).join('')||emptyRow(13,'Nothing listed yet. Connect eBay or add an item.')}</tbody>
   </table></div></div>
   <div class="muted" style="margin-top:10px">${items.length} listed · ${money(items.reduce((s,it)=>s+num(it.cost),0))} cost tied up · ${money(items.reduce((s,it)=>s+num(it.askingPrice),0))} asking</div>`;
   const si=document.getElementById('invSearch'); if(si) si.addEventListener('input',e=>{STATE.invFilter=e.target.value; renderListed(c);});
 }
 function rowListed(it){
   return `<tr>
-    <td onclick="editItem('${it.id}')" style="cursor:pointer"><strong>${esc(it.itemId||'—')}</strong></td>
+    <td onclick="editItem('${it.id}')" style="cursor:pointer"><strong>${esc(it.sku||'—')}</strong></td>
+    <td onclick="editItem('${it.id}')" style="cursor:pointer">${esc(it.itemId||'—')}</td>
     <td class="cell-title" title="${esc(it.title||'')}" onclick="editItem('${it.id}')" style="cursor:pointer">${esc(it.title||'')}</td>
     <td><span class="acct-badge acct-${it.account}">${esc(acctName(it.account))}</span></td>
-    <td>${esc(it.category||'—')}</td><td>${esc(it.location||'—')}</td>
     <td class="num">${it.cost?money(num(it.cost)):'—'}</td>
+    <td>${esc(it.source||'—')}</td>
+    <td class="num">${it.purchaseDate||'—'}</td>
     <td class="num">${it.askingPrice?money(num(it.askingPrice)):'—'}</td>
+    <td>${esc(it.location||'—')}</td>
+    <td>${esc(it.category||'—')}</td>
     <td class="num">${it.listedDate||'—'}</td>
     <td class="num">${daysSince(it.listedDate)}</td>
     <td class="row-actions"><button class="icon-btn" onclick="editItem('${it.id}')">Edit</button></td>
@@ -442,20 +451,23 @@ function renderUnlisted(c){
     <button class="btn" onclick="newItem()">＋ Add item</button>
   </div>
   <div class="panel"><div class="tablewrap"><table>
-    <thead><tr>${th('itemId','Item ID')}${th('title','Title')}<th>Acct</th>${th('category','Category')}${th('location','Location')}${th('source','Source')}${th('cost','Cost','num')}${th('purchaseDate','Sourced','num')}<th class="num">Days held</th><th></th></tr></thead>
-    <tbody>${items.map(rowUnlisted).join('')||emptyRow(10,'No on-hand items. Click Add item to log something you sourced.')}</tbody>
+    <thead><tr>${th('sku','Custom SKU')}${th('itemId','Item ID')}${th('title','Title')}<th>Acct</th>${th('cost','Purchase $','num')}${th('source','Purchased at')}${th('purchaseDate','Purchased','num')}${th('location','Location')}${th('category','Category')}<th class="num">Days held</th><th></th></tr></thead>
+    <tbody>${items.map(rowUnlisted).join('')||emptyRow(11,'No on-hand items. Click Add item to log something you sourced.')}</tbody>
   </table></div></div>
   <div class="muted" style="margin-top:10px">${items.length} on hand · ${money(items.reduce((s,it)=>s+num(it.cost),0))} cost tied up</div>`;
   const si=document.getElementById('invSearch'); if(si) si.addEventListener('input',e=>{STATE.invFilter=e.target.value; renderUnlisted(c);});
 }
 function rowUnlisted(it){
   return `<tr>
-    <td onclick="editItem('${it.id}')" style="cursor:pointer"><strong>${esc(it.itemId||'—')}</strong></td>
+    <td onclick="editItem('${it.id}')" style="cursor:pointer"><strong>${esc(it.sku||'—')}</strong></td>
+    <td onclick="editItem('${it.id}')" style="cursor:pointer">${esc(it.itemId||'—')}</td>
     <td class="cell-title" title="${esc(it.title||'')}" onclick="editItem('${it.id}')" style="cursor:pointer">${esc(it.title||'')} ${(it.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</td>
     <td><span class="acct-badge acct-${it.account}">${esc(acctName(it.account))}</span></td>
-    <td>${esc(it.category||'—')}</td><td>${esc(it.location||'—')}</td><td>${esc(it.source||'—')}</td>
     <td class="num">${it.cost?money(num(it.cost)):'—'}</td>
+    <td>${esc(it.source||'—')}</td>
     <td class="num">${it.purchaseDate||'—'}</td>
+    <td>${esc(it.location||'—')}</td>
+    <td>${esc(it.category||'—')}</td>
     <td class="num">${daysInStock(it)}</td>
     <td class="row-actions"><button class="icon-btn" onclick="editItem('${it.id}')">Edit</button></td>
   </tr>`;
@@ -718,6 +730,7 @@ function openItemModal(it){
   const s=DATA.settings; it=it||{account:STATE.account==='all'?'A':STATE.account,status:'sourced',purchaseDate:todayISO()};
   const f=document.getElementById('itemForm');
   f.innerHTML=
+    fieldHTML('sku','Custom SKU','text',it.sku)+
     fieldHTML('itemId','Item ID','text',it.itemId)+
     fieldHTML('title','Title','text',it.title)+
     fieldHTML('account','Account','select',it.account? (s.accounts.find(a=>a.id===it.account)||{}).name : s.accounts[0].name, s.accounts.map(a=>a.name))+
@@ -752,7 +765,7 @@ function readForm(){
   const salePrice=num(g('salePrice'));
   if((ebayFees===''||ebayFees==null) && salePrice>0){ const rate=acct==='A'?s.feeRateA:s.feeRateB; ebayFees=(salePrice*rate/100).toFixed(2); }
   return {
-    itemId:g('itemId'),title:g('title'),account:acct,category:g('category'),location:g('location'),source:g('source'),
+    sku:g('sku'),itemId:g('itemId'),title:g('title'),account:acct,category:g('category'),location:g('location'),source:g('source'),
     cost:num(g('cost')),purchaseDate:g('purchaseDate'),status:g('status'),listedDate:g('listedDate'),askingPrice:num(g('askingPrice'))||'',marketplace:g('marketplace'),
     salePrice:salePrice||'',saleDate:g('saleDate'),ebayFees:num(ebayFees)||'',shipCost:num(g('shipCost'))||'',otherFees:num(g('otherFees'))||'',
     refund:num(g('refund'))||'',consignPartner:g('consignPartner'),consignSplit:num(g('consignSplit'))||'',
