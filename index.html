@@ -235,10 +235,10 @@ const todayISO = () => new Date().toISOString().slice(0,10);
 
 const DEFAULT_DATA = {
   settings:{
-    accounts:[{id:'A',name:'Account A'},{id:'B',name:'Account B'}],
+    accounts:[{id:'A',name:'Garage'},{id:'B',name:'Recycled'}],
     categories:['Laptop','Desktop','Music CD','Vinyl','DVD','Parts','Other'],
-    locations:['Shelf A','Shelf B','Bin 1','Bin 2','Storage'],
-    sources:['Goodwill','Estate sale','Facebook Marketplace','Yard sale','Auction','Wholesale'],
+    locations:['Office','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','closet','brshelf'],
+    sources:['Goodwill','Dougbusters','Ebay','Estate sale','Facebook Marketplace','Yard sale','Auction','Wholesale'],
     marketplaces:['eBay','Mercari','Facebook','Local','Etsy','Other'],
     customFields:['Condition grade','Battery health'],
     feeRateA:13.25, feeRateB:13.25,
@@ -299,10 +299,10 @@ async function pullFromGitHub(silent){
     const j=await r.json();
     const remote=JSON.parse(b64decode(j.content));
     DATA._sha=j.sha;
-    if(remote.settings){ // keep local token/secrets, take the rest
-      const keep={ghToken:s.ghToken,ghRepo:s.ghRepo,ghBranch:s.ghBranch,ghAutoPull:s.ghAutoPull};
-      DATA.settings=Object.assign({},DEFAULT_DATA.settings,remote.settings,keep);
-    }
+    // Local settings always win; remote settings only fill keys missing
+    // locally (the eBay Action writes data.json with empty settings, which
+    // used to reset everything to defaults on every auto-pull).
+    DATA.settings=Object.assign({},DEFAULT_DATA.settings,(remote.settings||{}),s);
     const res=clientMerge(remote.items||[]);
     save(); buildAcctSwitch(); if(STATE.view) render();
     if(!silent) alert(`Pulled from GitHub: ${res.added} new, ${res.updated} updated.`);
