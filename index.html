@@ -230,6 +230,7 @@
 <script>
 /* ---------------- Data layer ---------------- */
 const LS_KEY = 'mojonator_data_v1';
+const SETTINGS_KEY = 'mojonator_settings_v1'; // settings live separately so no sync/import/old cached version can reset them
 const uid = () => Math.random().toString(36).slice(2,9);
 const todayISO = () => new Date().toISOString().slice(0,10);
 
@@ -252,15 +253,20 @@ let STATE = { view:'dashboard', account:'all', range:'90', sort:{key:'purchaseDa
 let charts = {};
 
 function load(){
+  let d;
   try{
     const raw = (typeof localStorage!=='undefined') && localStorage.getItem(LS_KEY);
-    if(raw) return migrate(JSON.parse(raw));
+    d = raw ? migrate(JSON.parse(raw)) : structuredCloneSafe(DEFAULT_DATA);
+  }catch(e){ d = structuredCloneSafe(DEFAULT_DATA); }
+  try{
+    const sv = (typeof localStorage!=='undefined') && localStorage.getItem(SETTINGS_KEY);
+    if(sv) d.settings = Object.assign({}, DEFAULT_DATA.settings, JSON.parse(sv));
   }catch(e){}
-  return structuredCloneSafe(DEFAULT_DATA);
+  return d;
 }
 function migrate(d){ d.settings = Object.assign({}, DEFAULT_DATA.settings, d.settings||{}); d.items = d.items||[]; return d; }
 function structuredCloneSafe(o){ return JSON.parse(JSON.stringify(o)); }
-function save(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(DATA)); }catch(e){} }
+function save(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(DATA)); localStorage.setItem(SETTINGS_KEY, JSON.stringify(DATA.settings)); }catch(e){} }
 
 /* ---------------- GitHub sync (pull/push data.json) ---------------- */
 /* Repo data.json is the source of truth. The GitHub Action writes eBay
@@ -822,7 +828,7 @@ function closeModal(){ document.getElementById('overlay').classList.remove('open
 
 /* ---------------- Import/export actions ---------------- */
 function exportJSON(){ downloadFile('data.json', JSON.stringify(DATA,null,2), 'application/json'); }
-function importJSON(e){ const file=e.target.files[0]; if(!file)return; const r=new FileReader(); r.onload=()=>{ try{ DATA=migrate(JSON.parse(r.result)); save(); buildAcctSwitch(); render(); alert('Data imported.'); }catch(err){ alert('Invalid JSON file.'); } }; r.readAsText(file); }
+function importJSON(e){ const file=e.target.files[0]; if(!file)return; const r=new FileReader(); r.onload=()=>{ try{ const keepS=DATA.settings; DATA=migrate(JSON.parse(r.result)); DATA.settings=keepS; save(); buildAcctSwitch(); render(); alert('Data imported.'); }catch(err){ alert('Invalid JSON file.'); } }; r.readAsText(file); }
 function exportIncomeCSV(){
   const sold=soldInRange();
   const rows=[['Item ID','Title','Account','Marketplace','Sale date','Sale price','Refund','COGS','Fees','Shipping','Net']];
