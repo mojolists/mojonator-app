@@ -57,6 +57,8 @@
   .bulkbar strong{align-self:center;margin-right:4px;color:var(--green-dark)}
   .bulkbar .field label{font-size:11px;font-weight:600;color:#446352}
   .bulkbar input,.bulkbar select{padding:6px 8px;border:1px solid #cfe0d5;border-radius:7px}
+  .price-peek{margin-top:12px;background:var(--green-soft);border:1px solid var(--green);border-radius:8px;padding:9px 12px;font-size:13px;line-height:1.5}
+  .price-peek:empty{display:none}
   .field{display:flex;flex-direction:column;gap:5px}
   .field label{font-size:12px;font-weight:600;color:var(--muted)}
   select,input[type=text],input[type=number],input[type=date],textarea{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#fff;color:var(--ink);width:100%}
@@ -225,6 +227,7 @@
     <div class="modal-head"><h3 id="modalTitle">Add item</h3><button class="x" onclick="closeModal()">×</button></div>
     <div class="modal-body">
       <div class="form-grid" id="itemForm"></div>
+      <div id="pricePeek" class="price-peek"></div>
     </div>
     <div class="modal-foot">
       <button class="btn danger" id="delBtn" style="margin-right:auto;display:none" onclick="deleteCurrent()">Delete</button>
@@ -809,7 +812,35 @@ function openItemModal(it){
     fieldHTML('tags','Tags (comma-sep)','text',(it.tags||[]).join(', '))+
     s.customFields.map(cf=>fieldHTML('cf_'+cf.replace(/\W/g,'_'),cf,'text',(it.custom||{})[cf])).join('')+
     fieldHTML('notes','Notes','textarea',it.notes);
+  f.oninput=f.onchange=updatePricePeek;
+  updatePricePeek();
   document.getElementById('overlay').classList.add('open');
+}
+
+// Live pricing-at-a-glance in the item modal: break-even = cost + shipping +
+// eBay fees. Fees use the account default rate (13.25%) unless a fee amount
+// has been entered; empty shipping is simply ignored.
+function updatePricePeek(){
+  const el=document.getElementById('pricePeek'); if(!el) return;
+  const v=id=>{const e=document.getElementById('f_'+id); return e?e.value:'';};
+  const cost=num(v('cost')), ship=num(v('shipCost'));
+  const feesRaw=v('ebayFees');
+  const acctSel=(DATA.settings.accounts.find(a=>a.name===v('account'))||{}).id||'A';
+  const rate=num(acctSel==='B'?DATA.settings.feeRateB:DATA.settings.feeRateA)||13.25;
+  const flat=String(feesRaw).trim()!=='';
+  let be, feeNote;
+  if(flat){ be=cost+ship+num(feesRaw); feeNote='entered fees '+money(num(feesRaw)); }
+  else { be=(cost+ship)/(1-rate/100); feeNote='fees est. @ '+rate+'%'; }
+  const parts=['cost '+money(cost)]; if(ship) parts.push('ship '+money(ship));
+  let html=`<strong>Break-even: ${money(be)}</strong> <span class="muted">(${parts.join(' + ')} · ${feeNote})</span>`;
+  const asking=v('askingPrice');
+  if(String(asking).trim()!==''){
+    const a=num(asking);
+    const fee=flat?num(feesRaw):a*rate/100;
+    const net=a-fee-ship-cost;
+    html+=` &nbsp;·&nbsp; <strong>Net at asking ${money(a)}: <span style="color:${net>=0?'var(--green-dark)':'var(--red)'}">${money(net)}</span></strong>`;
+  }
+  el.innerHTML=html;
 }
 function readForm(){
   const g=id=>{const el=document.getElementById('f_'+id);return el?el.value:'';};
