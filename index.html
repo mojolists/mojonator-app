@@ -50,6 +50,13 @@
   .calc-out span{font-size:12px;color:#446352}
   .calc-out b{font-variant-numeric:tabular-nums}
   .calc-big{font-size:18px;color:var(--green-dark)}
+  /* Bulk edit */
+  .selcell{width:34px;text-align:center}
+  .selcell input{width:15px;height:15px;cursor:pointer;accent-color:var(--green)}
+  .bulkbar{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;background:var(--green-soft);border:1px solid var(--green);border-radius:10px;padding:10px 14px;margin-bottom:14px}
+  .bulkbar strong{align-self:center;margin-right:4px;color:var(--green-dark)}
+  .bulkbar .field label{font-size:11px;font-weight:600;color:#446352}
+  .bulkbar input,.bulkbar select{padding:6px 8px;border:1px solid #cfe0d5;border-radius:7px}
   .field{display:flex;flex-direction:column;gap:5px}
   .field label{font-size:12px;font-weight:600;color:var(--muted)}
   select,input[type=text],input[type=number],input[type=date],textarea{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#fff;color:var(--ink);width:100%}
@@ -452,21 +459,24 @@ function invSearchMatch(it,q){ return !q || [it.sku,it.itemId,it.title,it.locati
 function renderListed(c){
   const q=(STATE.invFilter||'').toLowerCase();
   let items=sortItems(acctItems().filter(it=> it.status==='listed' && invSearchMatch(it,q)));
+  window.VIS_IDS=items.map(i=>i.id);
   c.innerHTML=`
   <div class="note">Items currently live on eBay (pulled from your active listings). When one sells, it moves to <strong>Sales</strong> automatically — nothing to do.</div>
   <div class="toolbar">
     <input class="grow" type="text" id="invSearch" placeholder="Search title, item ID, location…" value="${esc(STATE.invFilter||'')}">
     <button class="btn" onclick="newItem()">＋ Add item</button>
   </div>
+  ${bulkBar()}
   <div class="panel"><div class="tablewrap"><table>
-    <thead><tr>${th('sku','Custom SKU')}${th('itemId','Item ID')}${th('title','Title')}<th>Acct</th>${th('cost','Purchase $','num')}${th('source','Purchased at')}${th('purchaseDate','Purchased','num')}${th('askingPrice','Asking','num')}${th('location','Location')}${th('category','Category')}${th('listedDate','Listed','num')}<th class="num">Days</th><th></th></tr></thead>
-    <tbody>${items.map(rowListed).join('')||emptyRow(13,'Nothing listed yet. Connect eBay or add an item.')}</tbody>
+    <thead><tr><th class="selcell"><input type="checkbox" ${items.length&&items.every(i=>BULKSEL.has(i.id))?'checked':''} onclick="selAllVis(this.checked)" title="Select all"></th>${th('sku','Custom SKU')}${th('itemId','Item ID')}${th('title','Title')}<th>Acct</th>${th('cost','Purchase $','num')}${th('source','Purchased at')}${th('purchaseDate','Purchased','num')}${th('askingPrice','Asking','num')}${th('location','Location')}${th('category','Category')}${th('listedDate','Listed','num')}<th class="num">Days</th><th></th></tr></thead>
+    <tbody>${items.map(rowListed).join('')||emptyRow(14,'Nothing listed yet. Connect eBay or add an item.')}</tbody>
   </table></div></div>
   <div class="muted" style="margin-top:10px">${items.length} listed · ${money(items.reduce((s,it)=>s+num(it.cost),0))} cost tied up · ${money(items.reduce((s,it)=>s+num(it.askingPrice),0))} asking</div>`;
   const si=document.getElementById('invSearch'); if(si) si.addEventListener('input',e=>{STATE.invFilter=e.target.value; renderListed(c);});
 }
 function rowListed(it){
   return `<tr>
+    <td class="selcell"><input type="checkbox" ${BULKSEL.has(it.id)?'checked':''} onclick="toggleSel('${it.id}',this.checked)"></td>
     <td onclick="editItem('${it.id}')" style="cursor:pointer"><strong>${esc(it.sku||'—')}</strong></td>
     <td onclick="editItem('${it.id}')" style="cursor:pointer">${esc(it.itemId||'—')}</td>
     <td class="cell-title" title="${esc(it.title||'')}" onclick="editItem('${it.id}')" style="cursor:pointer">${esc(it.title||'')}</td>
@@ -486,21 +496,24 @@ function rowListed(it){
 function renderUnlisted(c){
   const q=(STATE.invFilter||'').toLowerCase();
   let items=sortItems(acctItems().filter(it=> isUnsold(it) && it.status!=='listed' && invSearchMatch(it,q)));
+  window.VIS_IDS=items.map(i=>i.id);
   c.innerHTML=`
   <div class="note">Stock you have on hand but haven't listed yet (the "death pile"). Log items here the moment you buy them; once you list them on eBay they move to <strong>Listed</strong>.</div>
   <div class="toolbar">
     <input class="grow" type="text" id="invSearch" placeholder="Search title, item ID, location…" value="${esc(STATE.invFilter||'')}">
     <button class="btn" onclick="newItem()">＋ Add item</button>
   </div>
+  ${bulkBar()}
   <div class="panel"><div class="tablewrap"><table>
-    <thead><tr>${th('sku','Custom SKU')}${th('itemId','Item ID')}${th('title','Title')}<th>Acct</th>${th('cost','Purchase $','num')}${th('source','Purchased at')}${th('purchaseDate','Purchased','num')}${th('location','Location')}${th('category','Category')}<th class="num">Days held</th><th></th></tr></thead>
-    <tbody>${items.map(rowUnlisted).join('')||emptyRow(11,'No on-hand items. Click Add item to log something you sourced.')}</tbody>
+    <thead><tr><th class="selcell"><input type="checkbox" ${items.length&&items.every(i=>BULKSEL.has(i.id))?'checked':''} onclick="selAllVis(this.checked)" title="Select all"></th>${th('sku','Custom SKU')}${th('itemId','Item ID')}${th('title','Title')}<th>Acct</th>${th('cost','Purchase $','num')}${th('source','Purchased at')}${th('purchaseDate','Purchased','num')}${th('location','Location')}${th('category','Category')}<th class="num">Days held</th><th></th></tr></thead>
+    <tbody>${items.map(rowUnlisted).join('')||emptyRow(12,'No on-hand items. Click Add item to log something you sourced.')}</tbody>
   </table></div></div>
   <div class="muted" style="margin-top:10px">${items.length} on hand · ${money(items.reduce((s,it)=>s+num(it.cost),0))} cost tied up</div>`;
   const si=document.getElementById('invSearch'); if(si) si.addEventListener('input',e=>{STATE.invFilter=e.target.value; renderUnlisted(c);});
 }
 function rowUnlisted(it){
   return `<tr>
+    <td class="selcell"><input type="checkbox" ${BULKSEL.has(it.id)?'checked':''} onclick="toggleSel('${it.id}',this.checked)"></td>
     <td onclick="editItem('${it.id}')" style="cursor:pointer"><strong>${esc(it.sku||'—')}</strong></td>
     <td onclick="editItem('${it.id}')" style="cursor:pointer">${esc(it.itemId||'—')}</td>
     <td class="cell-title" title="${esc(it.title||'')}" onclick="editItem('${it.id}')" style="cursor:pointer">${esc(it.title||'')} ${(it.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</td>
@@ -895,7 +908,42 @@ function clearAll(){ if(confirm('Delete ALL items? This cannot be undone.')){ DA
 /* ---------------- Helpers + wiring ---------------- */
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function cap(s){ return s?s.charAt(0).toUpperCase()+s.slice(1):''; }
-function go(v){ STATE.view=v; render(); }
+function go(v){ if(STATE.view!==v) BULKSEL.clear(); STATE.view=v; render(); }
+
+/* ---------------- Bulk edit ---------------- */
+const BULKSEL=new Set();
+function toggleSel(id,on){ if(on)BULKSEL.add(id); else BULKSEL.delete(id); render(); }
+function selAllVis(on){ (window.VIS_IDS||[]).forEach(id=>on?BULKSEL.add(id):BULKSEL.delete(id)); render(); }
+function clearSel(){ BULKSEL.clear(); render(); }
+function bulkBar(){
+  if(!BULKSEL.size) return '';
+  const s=DATA.settings;
+  const opt=arr=>['<option value="">— leave as is —</option>'].concat(arr.map(x=>`<option>${esc(x)}</option>`)).join('');
+  return `<div class="bulkbar">
+    <strong>${BULKSEL.size} selected</strong>
+    <div class="field"><label>Purchase $</label><input type="number" step="0.01" min="0" id="bkCost" style="width:90px" placeholder="—"></div>
+    <div class="field"><label>Purchased at</label><select id="bkSource">${opt(s.sources)}</select></div>
+    <div class="field"><label>Purchased date</label><input type="date" id="bkDate"></div>
+    <div class="field"><label>Location</label><select id="bkLoc">${opt(s.locations)}</select></div>
+    <div class="field"><label>Category</label><select id="bkCat">${opt(s.categories)}</select></div>
+    <button class="btn" onclick="applyBulk()">Apply to ${BULKSEL.size}</button>
+    <button class="btn ghost" onclick="clearSel()">Clear</button>
+  </div>`;
+}
+function applyBulk(){
+  const g=id=>{const e=document.getElementById(id);return e?e.value:''};
+  const cost=g('bkCost'), src=g('bkSource'), date=g('bkDate'), loc=g('bkLoc'), cat=g('bkCat');
+  if(cost===''&&!src&&!date&&!loc&&!cat){ alert('Fill in at least one field — only the fields you set get applied.'); return; }
+  DATA.items.forEach(it=>{
+    if(!BULKSEL.has(it.id)) return;
+    if(cost!=='') it.cost=num(cost);
+    if(src) it.source=src;
+    if(date) it.purchaseDate=date;
+    if(loc) it.location=loc;
+    if(cat) it.category=cat;
+  });
+  save(); BULKSEL.clear(); render();
+}
 function buildAcctSwitch(){
   const el=document.getElementById('acctSwitch');
   const opts=[{id:'all',name:'All'}].concat(DATA.settings.accounts.map(a=>({id:a.id,name:a.name})));
