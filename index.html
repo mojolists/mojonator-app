@@ -395,6 +395,19 @@ function destroyCharts(){ Object.values(charts).forEach(ch=>{try{ch.destroy()}ca
 
 /* ---------------- Dashboard ---------------- */
 function renderDashboard(c){
+  if(!DATA.items.length && !DATA.settings.ghToken){
+    c.innerHTML=`<div class="panel"><div class="panel-body" style="padding:28px">
+      <h2 style="margin-bottom:10px">Welcome to Mojonator</h2>
+      <p style="margin-bottom:14px">This computer isn't connected to your data yet. Your inventory lives in your private GitHub repo — connect once and it syncs automatically from then on:</p>
+      <ol class="steps">
+        <li>Open <strong>Settings &rarr; GitHub data sync</strong></li>
+        <li>Paste your GitHub token (the same fine-grained token you use on your main computer)</li>
+        <li>Click <strong>Pull now</strong> — done. The app auto-pulls on every open after that.</li>
+      </ol>
+      <div style="margin-top:16px"><button class="btn" onclick="go('settings')">Open Settings</button></div>
+    </div></div>`;
+    return;
+  }
   const sold=soldInRange();
   const gross=sold.reduce((s,it)=>s+num(it.salePrice),0);
   const net=sold.reduce((s,it)=>s+(netProfit(it)||0),0);
