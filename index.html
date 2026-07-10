@@ -753,7 +753,10 @@ function renderSettings(c){
     <div class="form-grid">
       <div class="field"><label>Repo (owner/name)</label><input type="text" value="${esc(s.ghRepo||'')}" onchange="DATA.settings.ghRepo=this.value.trim();save()"></div>
       <div class="field"><label>Branch</label><input type="text" value="${esc(s.ghBranch||'main')}" onchange="DATA.settings.ghBranch=this.value.trim();save()"></div>
-      <div class="field full"><label>GitHub token (fine-grained, Contents: Read &amp; write)</label><input type="password" placeholder="github_pat_..." value="${esc(s.ghToken||'')}" onchange="DATA.settings.ghToken=this.value.trim();save()"></div>
+      <div class="field full"><label>GitHub token (fine-grained, Contents: Read &amp; write)</label>
+        <div style="display:flex;gap:8px"><input style="flex:1" type="password" placeholder="github_pat_..." value="${esc(s.ghToken||'')}" onchange="DATA.settings.ghToken=this.value.trim();save()">
+        <button class="btn ghost" onclick="copyToken(this)" title="Copy the stored token so you can paste it into the app on another computer">Copy token</button></div>
+        <div class="hint">GitHub only shows a token once — use Copy token here to move it to another computer instead of making a new one.</div></div>
       <div class="field"><label>Auto-pull on open</label><select onchange="DATA.settings.ghAutoPull=this.value==='yes';save()"><option value="yes" ${s.ghAutoPull?'selected':''}>Yes</option><option value="no" ${!s.ghAutoPull?'selected':''}>No</option></select></div>
     </div>
     <div style="margin-top:12px"><button class="btn" onclick="pullFromGitHub(false)">⬇ Pull now</button> <button class="btn ghost" onclick="pushToGitHub()">⬆ Push now</button></div>
@@ -784,6 +787,11 @@ function listEditor(label,key){
   return `<div class="field" style="margin-bottom:14px"><label>${label}</label>
     <textarea rows="2" onchange="DATA.settings['${key}']=this.value.split(',').map(x=>x.trim()).filter(Boolean);save();buildAcctSwitch()">${(DATA.settings[key]||[]).join(', ')}</textarea>
     <div class="hint">Comma-separated.</div></div>`;
+}
+function copyToken(btn){
+  const t=DATA.settings.ghToken;
+  if(!t){ alert('No token stored in this browser yet.'); return; }
+  navigator.clipboard.writeText(t).then(()=>{ btn.textContent='Copied ✓'; setTimeout(()=>btn.textContent='Copy token',2000); },()=>alert('Could not copy — select the field text manually.'));
 }
 function setAcctName(id,v){ const a=DATA.settings.accounts.find(x=>x.id===id); if(a){a.name=v; save(); buildAcctSwitch();} }
 function setEbay(id,field,v){ const k='ebay_'+id; DATA.settings[k]=DATA.settings[k]||{}; DATA.settings[k][field]=v; save(); }
