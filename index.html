@@ -755,8 +755,9 @@ function renderSettings(c){
       <div class="field"><label>Branch</label><input type="text" value="${esc(s.ghBranch||'main')}" onchange="DATA.settings.ghBranch=this.value.trim();save()"></div>
       <div class="field full"><label>GitHub token (fine-grained, Contents: Read &amp; write)</label>
         <div style="display:flex;gap:8px"><input style="flex:1" type="password" placeholder="github_pat_..." value="${esc(s.ghToken||'')}" onchange="DATA.settings.ghToken=this.value.trim();save()">
-        <button class="btn ghost" onclick="copyToken(this)" title="Copy the stored token so you can paste it into the app on another computer">Copy token</button></div>
-        <div class="hint">GitHub only shows a token once — use Copy token here to move it to another computer instead of making a new one.</div></div>
+        <button class="btn ghost" onclick="copyToken(this)" title="Copy the stored token so you can paste it into the app on another computer">Copy token</button>
+        <button class="btn ghost" onclick="copySetupLink(this)" title="Copy a one-click setup link that stores this token in any browser you open it in">Copy setup link</button></div>
+        <div class="hint">GitHub only shows a token once. <strong>Copy setup link</strong> copies a URL that sets up any browser in one click \u2014 keep it in your password manager and treat it like a password.</div></div>
       <div class="field"><label>Auto-pull on open</label><select onchange="DATA.settings.ghAutoPull=this.value==='yes';save()"><option value="yes" ${s.ghAutoPull?'selected':''}>Yes</option><option value="no" ${!s.ghAutoPull?'selected':''}>No</option></select></div>
     </div>
     <div style="margin-top:12px"><button class="btn" onclick="pullFromGitHub(false)">⬇ Pull now</button> <button class="btn ghost" onclick="pushToGitHub()">⬆ Push now</button></div>
@@ -792,6 +793,12 @@ function copyToken(btn){
   const t=DATA.settings.ghToken;
   if(!t){ alert('No token stored in this browser yet.'); return; }
   navigator.clipboard.writeText(t).then(()=>{ btn.textContent='Copied ✓'; setTimeout(()=>btn.textContent='Copy token',2000); },()=>alert('Could not copy — select the field text manually.'));
+}
+function copySetupLink(btn){
+  const t=DATA.settings.ghToken;
+  if(!t){ alert('No token stored in this browser yet \u2014 paste one in the field above first.'); return; }
+  const link=location.origin+location.pathname+'#gh='+encodeURIComponent(t);
+  navigator.clipboard.writeText(link).then(()=>{ btn.textContent='Copied \u2713'; setTimeout(()=>btn.textContent='Copy setup link',2000); },()=>alert('Could not copy \u2014 clipboard blocked.'));
 }
 function setAcctName(id,v){ const a=DATA.settings.accounts.find(x=>x.id===id); if(a){a.name=v; save(); buildAcctSwitch();} }
 function setEbay(id,field,v){ const k='ebay_'+id; DATA.settings[k]=DATA.settings[k]||{}; DATA.settings[k][field]=v; save(); }
@@ -1049,6 +1056,19 @@ function calcInit(){
   p.addEventListener('input',calcUpdate);
 }
 calcInit();
+
+/* MOJO_V112_SETUPLINK: open .../#gh=<token> to store the GitHub token in this browser */
+(function(){
+  try{
+    const m=(location.hash||'').match(/[#&]gh=([^&]+)/);
+    if(m){
+      const t=decodeURIComponent(m[1]).trim();
+      if(t){ DATA.settings.ghToken=t; save(); }
+      history.replaceState(null,'',location.pathname+location.search); // strip token from URL & history
+      if(t) setTimeout(()=>alert('GitHub token saved to this browser. You\u2019re synced.'),100);
+    }
+  }catch(e){}
+})();
 
 buildAcctSwitch();
 render();
