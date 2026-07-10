@@ -290,12 +290,20 @@ function ghUrl(){ return `https://api.github.com/repos/${DATA.settings.ghRepo}/c
 
 // Merge incoming (repo) items into local: eBay fields from incoming,
 // manual fields kept locally when incoming lacks them. No duplicates.
-function clientMerge(incoming){
+function clientMerge(incoming){ /* MOJO_V113_MERGEFIX */
   const key = it => it.ebayOrderId || it.id;
   const localByKey = new Map(DATA.items.map(it=>[key(it),it]));
+  // Pre-sale copies of items are keyed by plain id; once sold, the repo
+  // record is keyed by ebayOrderId. Match those by ebayItemId so the local
+  // listed copy upgrades in place instead of duplicating.
+  const localByEbayId = new Map(DATA.items.filter(it=>it.ebayItemId && !it.ebayOrderId).map(it=>[it.ebayItemId,it]));
   let added=0, updated=0;
   incoming.forEach(inc=>{
-    const m=localByKey.get(key(inc));
+    let m=localByKey.get(key(inc));
+    if(!m && inc.ebayOrderId && inc.ebayItemId){
+      m=localByEbayId.get(inc.ebayItemId);
+      if(m){ m.ebayOrderId=inc.ebayOrderId; localByEbayId.delete(inc.ebayItemId); } // one listed copy absorbs one order
+    }
     if(m){
       EBAY_FIELDS.forEach(f=>{ if(inc[f]!==''&&inc[f]!=null) m[f]=inc[f]; });
       MANUAL_FIELDS.forEach(f=>{ const empty=(m[f]===''||m[f]==null||(Array.isArray(m[f])&&!m[f].length)); if(empty && inc[f]!=null && inc[f]!=='') m[f]=inc[f]; });
