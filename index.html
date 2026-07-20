@@ -573,15 +573,15 @@ function renderSales(c){
     ${kpi('Fees',money0(fees),'neg','')}${kpi('Shipping',money0(ship),'neg','')}
   </div>
   <div class="panel"><div class="panel-head"><h2>Sales (${sold.length})</h2></div><div class="tablewrap"><table>
-    <thead><tr><th>Item ID</th><th>Title</th><th>Acct</th><th>Marketplace</th><th>Sold</th>
+    <thead><tr><th>Item ID</th><th>Title</th><th>Acct</th><th>Marketplace</th><th>Sold</th><th>Location</th>
       <th class="num">Sale</th><th class="num">Fees</th><th class="num">Ship</th><th class="num">Cost</th><th class="num">Net</th><th class="num">ROI</th></tr></thead>
     <tbody>${sold.map(it=>`<tr onclick="editItem('${it.id}')" style="cursor:pointer">
       <td><strong>${esc(it.itemId||'—')}</strong></td><td class="cell-title" title="${esc(it.title||'')}">${esc(it.title||'')}</td>
       <td><span class="acct-badge acct-${it.account}">${esc(acctName(it.account))}</span></td>
-      <td>${esc(it.marketplace||'eBay')}</td><td>${it.saleDate||'—'}</td>
+      <td>${esc(it.marketplace||'eBay')}</td><td>${it.saleDate||'—'}</td><td>${esc(it.location||'—')}</td><!--MOJO_V114_SALESLOC-->
       <td class="num">${money(num(it.salePrice))}</td><td class="num neg">${money(num(it.ebayFees)+num(it.otherFees))}</td>
       <td class="num neg">${money(num(it.shipCost))}</td><td class="num">${money(num(it.cost))}</td>
-      <td class="num ${netProfit(it)>=0?'pos':'neg'}">${money(netProfit(it))}</td><td class="num">${pct(roi(it))}</td></tr>`).join('')||emptyRow(11)}</tbody>
+      <td class="num ${netProfit(it)>=0?'pos':'neg'}">${money(netProfit(it))}</td><td class="num">${pct(roi(it))}</td></tr>`).join('')||emptyRow(12)}</tbody>
   </table></div></div>`;
 }
 
