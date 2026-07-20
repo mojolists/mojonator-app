@@ -274,7 +274,9 @@ function load(){
   }catch(e){}
   return d;
 }
-function migrate(d){ d.settings = Object.assign({}, DEFAULT_DATA.settings, d.settings||{}); d.items = d.items||[]; return d; }
+/* MOJO_V115_PENNYFIX: 1-cent placeholder costs (old "no cost" workaround) become blank so ROI reads as n/a */
+function cleanPennyCosts(items){ let n=0; (items||[]).forEach(it=>{ if(parseFloat(it.cost)===0.01){ it.cost=''; n++; } }); return n; }
+function migrate(d){ d.settings = Object.assign({}, DEFAULT_DATA.settings, d.settings||{}); d.items = d.items||[]; cleanPennyCosts(d.items); return d; }
 function structuredCloneSafe(o){ return JSON.parse(JSON.stringify(o)); }
 function save(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(DATA)); localStorage.setItem(SETTINGS_KEY, JSON.stringify(DATA.settings)); }catch(e){} }
 
@@ -328,6 +330,7 @@ async function pullFromGitHub(silent){
     // used to reset everything to defaults on every auto-pull).
     DATA.settings=Object.assign({},DEFAULT_DATA.settings,(remote.settings||{}),s);
     const res=clientMerge(remote.items||[]);
+    cleanPennyCosts(DATA.items);
     save(); buildAcctSwitch(); if(STATE.view) render();
     if(!silent) alert(`Pulled from GitHub: ${res.added} new, ${res.updated} updated.`);
   }catch(e){ if(!silent) alert('Pull failed: '+e.message); }
