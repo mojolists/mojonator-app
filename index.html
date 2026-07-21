@@ -195,7 +195,7 @@
       <a data-view="settings"><span class="ic">⚙</span> Settings</a>
       <a id="calcNav"><span class="ic">%</span> Price calc</a>
     </nav>
-    <div class="side-foot">Mojonator v1.0<br>Local · GitHub-sync ready</div>
+    <div class="side-foot">Mojonator v1.0 (b116)<br>Local · GitHub-sync ready</div>
   </aside>
 
   <!-- Main -->
@@ -253,7 +253,8 @@ const DEFAULT_DATA = {
     marketplaces:['eBay','Mercari','Facebook','Local','Etsy','Other'],
     customFields:['Condition grade','Battery health'],
     feeRateA:13.25, feeRateB:13.25,
-    ghRepo:'mojolists/mojonator', ghBranch:'main', ghToken:'', ghAutoPull:true
+    ghRepo:'mojolists/mojonator', ghBranch:'main', ghToken:'', ghAutoPull:true,
+    relistConfig:{enabled:false,dropPct:5,maxDropPct:20,startOn:2,dryRun:true}
   },
   items:[]
 };
@@ -284,7 +285,7 @@ function save(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(DATA)); localS
 /* Repo data.json is the source of truth. The GitHub Action writes eBay
    sales into it server-side; the app pulls it, you add costs, you push. */
 const EBAY_FIELDS = ['title','salePrice','saleDate','ebayFees','shipCost','status','marketplace','ebayItemId'];
-const MANUAL_FIELDS = ['cost','source','location','category','purchaseDate','tags','custom','notes','consignPartner','consignSplit','itemId','sku','listedDate','refund','otherFees'];
+const MANUAL_FIELDS = ['cost','source','location','category','purchaseDate','tags','custom','notes','consignPartner','consignSplit','itemId','sku','listedDate','refund','otherFees','autoRelist'];
 function b64encode(s){ return btoa(unescape(encodeURIComponent(s))); }
 function b64decode(s){ return decodeURIComponent(escape(atob(s.replace(/\s/g,'')))); }
 function ghHeaders(){ const t=DATA.settings.ghToken; return t?{Authorization:'Bearer '+t,Accept:'application/vnd.github+json'}:{Accept:'application/vnd.github+json'}; }
@@ -307,6 +308,10 @@ function clientMerge(incoming){ /* MOJO_V113_MERGEFIX */
       if(m){ m.ebayOrderId=inc.ebayOrderId; localByEbayId.delete(inc.ebayItemId); } // one listed copy absorbs one order
     }
     if(m){
+      /* MOJO_V116_RELIST: the Action relisted this item under a new eBay ID —
+         take the fresh price/listed date too, and carry the relist state. */
+      if(inc.ebayItemId && m.ebayItemId && inc.ebayItemId!==m.ebayItemId){ m.askingPrice=inc.askingPrice; m.listedDate=inc.listedDate; }
+      if(inc.relist) m.relist=inc.relist;
       EBAY_FIELDS.forEach(f=>{ if(inc[f]!==''&&inc[f]!=null) m[f]=inc[f]; });
       MANUAL_FIELDS.forEach(f=>{ const empty=(m[f]===''||m[f]==null||(Array.isArray(m[f])&&!m[f].length)); if(empty && inc[f]!=null && inc[f]!=='') m[f]=inc[f]; });
       updated++;
@@ -495,8 +500,8 @@ function renderListed(c){
   </div>
   ${bulkBar()}
   <div class="panel"><div class="tablewrap"><table>
-    <thead><tr><th class="selcell"><input type="checkbox" ${items.length&&items.every(i=>BULKSEL.has(i.id))?'checked':''} onclick="selAllVis(this.checked)" title="Select all"></th>${th('sku','Custom SKU')}${th('itemId','Item ID')}${th('title','Title')}<th>Acct</th>${th('cost','Purchase $','num')}${th('source','Purchased at')}${th('purchaseDate','Purchased','num')}${th('askingPrice','Asking','num')}${th('location','Location')}${th('category','Category')}${th('listedDate','Listed','num')}<th class="num">Days</th><th></th></tr></thead>
-    <tbody>${items.map(rowListed).join('')||emptyRow(14,'Nothing listed yet. Connect eBay or add an item.')}</tbody>
+    <thead><tr><th class="selcell"><input type="checkbox" ${items.length&&items.every(i=>BULKSEL.has(i.id))?'checked':''} onclick="selAllVis(this.checked)" title="Select all"></th>${th('sku','Custom SKU')}${th('itemId','Item ID')}${th('title','Title')}<th>Acct</th>${th('cost','Purchase $','num')}${th('source','Purchased at')}${th('purchaseDate','Purchased','num')}${th('askingPrice','Asking','num')}${th('location','Location')}${th('category','Category')}${th('listedDate','Listed','num')}<th class="num">Days</th><th class="num" title="Next auto-relist">Relist</th><th></th></tr></thead>
+    <tbody>${items.map(rowListed).join('')||emptyRow(15,'Nothing listed yet. Connect eBay or add an item.')}</tbody>
   </table></div></div>
   <div class="muted" style="margin-top:10px">${items.length} listed · ${money(items.reduce((s,it)=>s+num(it.cost),0))} cost tied up · ${money(items.reduce((s,it)=>s+num(it.askingPrice),0))} asking</div>`;
   const si=document.getElementById('invSearch'); if(si) si.addEventListener('input',e=>{STATE.invFilter=e.target.value; renderListed(c);});
@@ -516,8 +521,22 @@ function rowListed(it){
     <td>${esc(it.category||'—')}</td>
     <td class="num">${it.listedDate||'—'}</td>
     <td class="num">${daysSince(it.listedDate)}</td>
+    <td class="num">${relistCell(it)}</td>
     <td class="row-actions"><button class="icon-btn" onclick="editItem('${it.id}')">Edit</button></td>
   </tr>`;
+}
+/* MOJO_V116_RELIST: per-row auto-relist status for the Listings tab */
+function relistCell(it){
+  const cfg=DATA.settings.relistConfig||{};
+  if(it.relist&&it.relist.err) return `<span title="Last relist failed: ${esc(it.relist.err)} — check the listing on eBay" style="color:var(--red)">⚠</span>`;
+  if(it.autoRelist===false) return '<span class="muted" title="Auto-relist is off for this item">off</span>';
+  if(!cfg.enabled) return '<span class="muted">—</span>';
+  const ds=daysSince(it.listedDate);
+  if(!it.listedDate) return '<span class="muted">—</span>';
+  const cycle=ds%30, due=cycle>=29?0:Math.ceil(29-cycle);
+  const count=(it.relist&&it.relist.count)?` <span class="muted" title="Times relisted">×${it.relist.count}</span>`:'';
+  const mode=cfg.dryRun?' (dry run)':'';
+  return `<span title="Auto-relist${mode}: ends & relists in the last day of each 30-day cycle">${due===0?'due':'in '+due+'d'}</span>${count}`;
 }
 
 function renderUnlisted(c){
@@ -773,6 +792,18 @@ function renderSettings(c){
     </div>
     <div style="margin-top:12px"><button class="btn" onclick="pullFromGitHub(false)">⬇ Pull now</button> <button class="btn ghost" onclick="pushToGitHub()">⬆ Push now</button></div>
   </div>
+  <div class="panel"><div class="panel-head"><h2>Auto-relist (fresh listings every 30 days)</h2></div><div class="panel-body">
+    <div class="note">Ends each active listing in the last day of its 30-day cycle and immediately relists it — new item ID, fresh "newly listed" boost in eBay search (views/watchers reset). The optional price drop compounds each relist from the original price, Flipwise-style. Runs inside the hourly eBay sync. <strong>Settings apply after you Push</strong> — the Action reads them from <code>data.json</code>.</div>
+    <div class="form-grid">
+      <div class="field"><label>Auto-relist</label><select onchange="setRelist('enabled',this.value==='on')"><option value="off" ${!rc().enabled?'selected':''}>Off</option><option value="on" ${rc().enabled?'selected':''}>On</option></select></div>
+      <div class="field"><label>Mode</label><select onchange="setRelist('dryRun',this.value==='dry')"><option value="dry" ${rc().dryRun?'selected':''}>Dry run (log only)</option><option value="live" ${!rc().dryRun?'selected':''}>Live (really end &amp; relist)</option></select></div>
+      <div class="field"><label>Price drop per relist (%)</label><input type="number" step="1" min="0" value="${rc().dropPct}" onchange="setRelist('dropPct',num(this.value))"></div>
+      <div class="field"><label>Max total drop (%)</label><input type="number" step="1" min="0" value="${rc().maxDropPct}" onchange="setRelist('maxDropPct',num(this.value))"></div>
+      <div class="field"><label>Start dropping on relist #</label><input type="number" step="1" min="1" value="${rc().startOn}" onchange="setRelist('startOn',Math.max(1,Math.round(num(this.value))||1))"></div>
+    </div>
+    <div class="hint" style="margin-top:8px">Example at 5% / 20% max / start on #2: relist 1 keeps the price, then $100 → $95 → $90 → $85 → $80 floor. Set drop to 0 to relist at the same price. Changing a price on eBay restarts the drop cycle from the new price.<br>
+    <strong>Live mode needs a one-time re-authorization</strong> of each store with the <code>sell.inventory</code> permission added (dry run works now). Skipped automatically: multi-quantity listings, items with Auto-relist "No" in their edit form, non-eBay items. Max 25 relists per run. If a relist errors mid-way, the Listings tab shows ⚠ — check that item on eBay.</div>
+  </div></div>
   <div class="panel"><div class="panel-head"><h2>eBay live sync (both accounts)</h2></div><div class="panel-body">
     <div class="note">Live sync runs via a <strong>GitHub Action</strong> using your eBay developer keyset — no third-party host, secrets stay in GitHub. Enter a keyset per account below (stored locally). The Action does the OAuth token exchange and writes sales into <code>data.json</code>. See setup steps beneath.</div>
     ${s.accounts.map(a=>`<div style="border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px">
@@ -813,6 +844,9 @@ function copySetupLink(btn){
 }
 function setAcctName(id,v){ const a=DATA.settings.accounts.find(x=>x.id===id); if(a){a.name=v; save(); buildAcctSwitch();} }
 function setEbay(id,field,v){ const k='ebay_'+id; DATA.settings[k]=DATA.settings[k]||{}; DATA.settings[k][field]=v; save(); }
+/* MOJO_V116_RELIST: relistConfig accessors (lives in settings; the Action reads the pushed copy in data.json) */
+function rc(){ return DATA.settings.relistConfig=(DATA.settings.relistConfig||Object.assign({},DEFAULT_DATA.settings.relistConfig)); }
+function setRelist(key,val){ rc()[key]=val; save(); }
 
 /* ---------------- Item modal ---------------- */
 function fieldHTML(id,label,type,val,opts){
@@ -839,6 +873,7 @@ function openItemModal(it){
     fieldHTML('status','Status','select',it.status,['sourced','listed','sold','shipped','returned'])+
     fieldHTML('listedDate','Listed date','date',it.listedDate)+
     fieldHTML('askingPrice','Asking price ($)','number',it.askingPrice)+
+    fieldHTML('autoRelist','Auto-relist','select',it.autoRelist===false?'No':'Yes',['Yes','No'])+
     fieldHTML('marketplace','Marketplace','select',it.marketplace||s.marketplaces[0],s.marketplaces)+
     fieldHTML('salePrice','Sale price ($)','number',it.salePrice)+
     fieldHTML('saleDate','Sale date','date',it.saleDate)+
@@ -894,7 +929,8 @@ function readForm(){
     cost:num(g('cost')),purchaseDate:g('purchaseDate'),status:g('status'),listedDate:g('listedDate'),askingPrice:num(g('askingPrice'))||'',marketplace:g('marketplace'),
     salePrice:salePrice||'',saleDate:g('saleDate'),ebayFees:num(ebayFees)||'',shipCost:num(g('shipCost'))||'',otherFees:num(g('otherFees'))||'',
     refund:num(g('refund'))||'',consignPartner:g('consignPartner'),consignSplit:num(g('consignSplit'))||'',
-    tags:g('tags').split(',').map(x=>x.trim()).filter(Boolean),custom,notes:g('notes')
+    tags:g('tags').split(',').map(x=>x.trim()).filter(Boolean),custom,notes:g('notes'),
+    autoRelist:g('autoRelist')==='No'?false:undefined
   };
 }
 function saveItem(){
