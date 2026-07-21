@@ -195,7 +195,7 @@
       <a data-view="settings"><span class="ic">⚙</span> Settings</a>
       <a id="calcNav"><span class="ic">%</span> Price calc</a>
     </nav>
-    <div class="side-foot">Mojonator v1.0 (b116)<br>Local · GitHub-sync ready</div>
+    <div class="side-foot">Mojonator v1.0 (b117)<br>Local · GitHub-sync ready</div>
   </aside>
 
   <!-- Main -->
@@ -254,7 +254,7 @@ const DEFAULT_DATA = {
     customFields:['Condition grade','Battery health'],
     feeRateA:13.25, feeRateB:13.25,
     ghRepo:'mojolists/mojonator', ghBranch:'main', ghToken:'', ghAutoPull:true,
-    relistConfig:{enabled:false,dropPct:5,maxDropPct:20,startOn:2,dryRun:true}
+    relistConfig:{enabled:false,dropPct:5,maxDropPct:20,startOn:2,dryRun:true,minPrice:12}
   },
   items:[]
 };
@@ -800,8 +800,15 @@ function renderSettings(c){
       <div class="field"><label>Price drop per relist (%)</label><input type="number" step="1" min="0" value="${rc().dropPct}" onchange="setRelist('dropPct',num(this.value))"></div>
       <div class="field"><label>Max total drop (%)</label><input type="number" step="1" min="0" value="${rc().maxDropPct}" onchange="setRelist('maxDropPct',num(this.value))"></div>
       <div class="field"><label>Start dropping on relist #</label><input type="number" step="1" min="1" value="${rc().startOn}" onchange="setRelist('startOn',Math.max(1,Math.round(num(this.value))||1))"></div>
+      <div class="field"><label>Only drop prices above ($)</label><input type="number" step="1" min="0" value="${rc().minPrice==null?12:rc().minPrice}" onchange="setRelist('minPrice',num(this.value))"></div>
     </div>
-    <div class="hint" style="margin-top:8px">Example at 5% / 20% max / start on #2: relist 1 keeps the price, then $100 → $95 → $90 → $85 → $80 floor. Set drop to 0 to relist at the same price. Changing a price on eBay restarts the drop cycle from the new price.<br>
+    <div style="margin-top:12px"><strong>Per-store overrides</strong> <span class="muted">— leave blank to use the settings above</span></div>
+    ${s.accounts.map(a=>{const o=(rc().stores||{})[a.id]||{};return `<div class="form-grid" style="margin-top:8px;border:1px solid var(--line);border-radius:10px;padding:10px">
+      <div class="field"><label>${esc(a.name)} (${a.id}) — drop per relist (%)</label><input type="number" step="1" min="0" placeholder="${rc().dropPct}" value="${o.dropPct==null?'':o.dropPct}" onchange="setRelistStore('${a.id}','dropPct',this.value)"></div>
+      <div class="field"><label>Max total drop (%)</label><input type="number" step="1" min="0" placeholder="${rc().maxDropPct}" value="${o.maxDropPct==null?'':o.maxDropPct}" onchange="setRelistStore('${a.id}','maxDropPct',this.value)"></div>
+      <div class="field"><label>Only drop above ($)</label><input type="number" step="1" min="0" placeholder="${rc().minPrice==null?12:rc().minPrice}" value="${o.minPrice==null?'':o.minPrice}" onchange="setRelistStore('${a.id}','minPrice',this.value)"></div>
+    </div>`;}).join('')}
+    <div class="hint" style="margin-top:8px">Example at 5% / 20% max / start on #2: relist 1 keeps the price, then $100 → $95 → $90 → $85 → $80 floor. Set drop to 0 to relist at the same price. Changing a price on eBay restarts the drop cycle from the new price. Items at or under the "only drop prices above" floor still relist — just at the same price — and no drop ever takes a price below that floor.<br>
     <strong>Live mode needs a one-time re-authorization</strong> of each store with the <code>sell.inventory</code> permission added (dry run works now). Skipped automatically: multi-quantity listings, items with Auto-relist "No" in their edit form, non-eBay items. Max 25 relists per run. If a relist errors mid-way, the Listings tab shows ⚠ — check that item on eBay.</div>
   </div></div>
   <div class="panel"><div class="panel-head"><h2>eBay live sync (both accounts)</h2></div><div class="panel-body">
@@ -844,9 +851,10 @@ function copySetupLink(btn){
 }
 function setAcctName(id,v){ const a=DATA.settings.accounts.find(x=>x.id===id); if(a){a.name=v; save(); buildAcctSwitch();} }
 function setEbay(id,field,v){ const k='ebay_'+id; DATA.settings[k]=DATA.settings[k]||{}; DATA.settings[k][field]=v; save(); }
-/* MOJO_V116_RELIST: relistConfig accessors (lives in settings; the Action reads the pushed copy in data.json) */
+/* MOJO_V116_RELIST + MOJO_V117_MINPRICE: relistConfig accessors (lives in settings; the Action reads the pushed copy in data.json) */
 function rc(){ return DATA.settings.relistConfig=(DATA.settings.relistConfig||Object.assign({},DEFAULT_DATA.settings.relistConfig)); }
 function setRelist(key,val){ rc()[key]=val; save(); }
+function setRelistStore(id,key,val){ const c=rc(); c.stores=c.stores||{}; c.stores[id]=c.stores[id]||{}; if(String(val).trim()===''){ delete c.stores[id][key]; if(!Object.keys(c.stores[id]).length) delete c.stores[id]; } else { c.stores[id][key]=num(val); } save(); }
 
 /* ---------------- Item modal ---------------- */
 function fieldHTML(id,label,type,val,opts){
