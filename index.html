@@ -195,7 +195,7 @@
       <a data-view="settings"><span class="ic">⚙</span> Settings</a>
       <a id="calcNav"><span class="ic">%</span> Price calc</a>
     </nav>
-    <div class="side-foot">Mojonator v1.0 (b117)<br>Local · GitHub-sync ready</div>
+    <div class="side-foot">Mojonator v1.0 (b118)<br>Local · GitHub-sync ready</div>
   </aside>
 
   <!-- Main -->
@@ -312,6 +312,9 @@ function clientMerge(incoming){ /* MOJO_V113_MERGEFIX */
          take the fresh price/listed date too, and carry the relist state. */
       if(inc.ebayItemId && m.ebayItemId && inc.ebayItemId!==m.ebayItemId){ m.askingPrice=inc.askingPrice; m.listedDate=inc.listedDate; }
       if(inc.relist) m.relist=inc.relist;
+      /* MOJO_B118_SKULOC: the eBay custom label doubles as the storage location, so
+         for eBay items the synced sku (and the location derived from it) wins. */
+      if(inc.ebayItemId && inc.sku){ m.sku=inc.sku; if(inc.location && inc.location===inc.sku) m.location=inc.location; }
       EBAY_FIELDS.forEach(f=>{ if(inc[f]!==''&&inc[f]!=null) m[f]=inc[f]; });
       MANUAL_FIELDS.forEach(f=>{ const empty=(m[f]===''||m[f]==null||(Array.isArray(m[f])&&!m[f].length)); if(empty && inc[f]!=null && inc[f]!=='') m[f]=inc[f]; });
       updated++;
@@ -874,7 +877,7 @@ function openItemModal(it){
     fieldHTML('title','Title','text',it.title)+
     fieldHTML('account','Account','select',it.account? (s.accounts.find(a=>a.id===it.account)||{}).name : s.accounts[0].name, s.accounts.map(a=>a.name))+
     fieldHTML('category','Category','select',it.category||s.categories[0],s.categories)+
-    fieldHTML('location','Location','select',it.location||s.locations[0],s.locations)+
+    fieldHTML('location','Location','select',it.location||s.locations[0],(it.location&&!s.locations.includes(it.location))?[it.location].concat(s.locations):s.locations)+
     fieldHTML('source','Source','select',it.source||s.sources[0],s.sources)+
     fieldHTML('cost','Cost ($)','number',it.cost)+
     fieldHTML('purchaseDate','Purchase date','date',it.purchaseDate)+
