@@ -195,7 +195,7 @@
       <a data-view="settings"><span class="ic">⚙</span> Settings</a>
       <a id="calcNav"><span class="ic">%</span> Price calc</a>
     </nav>
-    <div class="side-foot">Mojonator v1.0 (b118)<br>Local · GitHub-sync ready</div>
+    <div class="side-foot">Mojonator v1.0 (b119)<br>Local · GitHub-sync ready</div>
   </aside>
 
   <!-- Main -->
@@ -313,8 +313,12 @@ function clientMerge(incoming){ /* MOJO_V113_MERGEFIX */
       if(inc.ebayItemId && m.ebayItemId && inc.ebayItemId!==m.ebayItemId){ m.askingPrice=inc.askingPrice; m.listedDate=inc.listedDate; }
       if(inc.relist) m.relist=inc.relist;
       /* MOJO_B118_SKULOC: the eBay custom label doubles as the storage location, so
-         for eBay items the synced sku (and the location derived from it) wins. */
-      if(inc.ebayItemId && inc.sku){ m.sku=inc.sku; if(inc.location && inc.location===inc.sku) m.location=inc.location; }
+         for eBay items the synced sku (and the location derived from it) wins.
+         MOJO_B119_SKUPUSH: unless a local label edit is pending — then local wins
+         until the Action confirms it applied (incoming sku matches the pending value). */
+      if(m.pendingSku!=null && inc.sku===m.pendingSku){ delete m.pendingSku; delete m.pendingSkuErr; }
+      if(inc.ebayItemId && inc.sku && m.pendingSku==null){ m.sku=inc.sku; if(inc.location && inc.location===inc.sku) m.location=inc.location; }
+      if(inc.pendingSkuErr && m.pendingSku!=null) m.pendingSkuErr=inc.pendingSkuErr;
       EBAY_FIELDS.forEach(f=>{ if(inc[f]!==''&&inc[f]!=null) m[f]=inc[f]; });
       MANUAL_FIELDS.forEach(f=>{ const empty=(m[f]===''||m[f]==null||(Array.isArray(m[f])&&!m[f].length)); if(empty && inc[f]!=null && inc[f]!=='') m[f]=inc[f]; });
       updated++;
@@ -520,7 +524,7 @@ function rowListed(it){
     <td>${esc(it.source||'—')}</td>
     <td class="num">${it.purchaseDate||'—'}</td>
     <td class="num">${it.askingPrice?money(num(it.askingPrice)):'—'}</td>
-    <td>${esc(it.location||'—')}</td>
+    <td>${esc(it.location||'—')}${it.pendingSku!=null?(it.pendingSkuErr?` <span title="eBay label update FAILED: ${esc(it.pendingSkuErr)} — will retry next sync" style="color:var(--red)">⚠</span>`:' <span title="Label update queued — applies to eBay on the next sync after you Push" class="muted">⏳</span>'):''}</td>
     <td>${esc(it.category||'—')}</td>
     <td class="num">${it.listedDate||'—'}</td>
     <td class="num">${daysSince(it.listedDate)}</td>
@@ -946,7 +950,17 @@ function readForm(){
 }
 function saveItem(){
   const data=readForm();
-  if(STATE.editingId){ const it=DATA.items.find(x=>x.id===STATE.editingId); Object.assign(it,data); }
+  if(STATE.editingId){
+    const it=DATA.items.find(x=>x.id===STATE.editingId);
+    /* MOJO_B119_SKUPUSH: for live eBay listings, a changed SKU or Location becomes
+       the new custom label on eBay (applied by the next hourly sync). */
+    if(it.ebayItemId && it.status==='listed'){
+      const skuChanged=data.sku!==(it.sku||''), locChanged=data.location!==(it.location||'');
+      const newLabel=skuChanged?data.sku:(locChanged?data.location:null);
+      if(newLabel){ data.pendingSku=newLabel; data.sku=newLabel; data.location=newLabel; }
+    }
+    Object.assign(it,data);
+  }
   else { data.id=uid(); if(!data.itemId) data.itemId=autoId(data.account); DATA.items.push(data); }
   save(); closeModal(); render();
 }
@@ -1041,7 +1055,7 @@ function bulkBar(){
     <div class="field"><label>Purchase $</label><input type="number" step="0.01" min="0" id="bkCost" style="width:90px" placeholder="—"></div>
     <div class="field"><label>Purchased at</label><select id="bkSource">${opt(s.sources)}</select></div>
     <div class="field"><label>Purchased date</label><input type="date" id="bkDate"></div>
-    <div class="field"><label>Location</label><select id="bkLoc">${opt(s.locations)}</select></div>
+    <div class="field"><label>Location</label><input id="bkLoc" list="bkLocList" placeholder="— leave as is —" style="width:130px"><datalist id="bkLocList">${s.locations.map(x=>`<option>${esc(x)}</option>`).join('')}</datalist></div>
     <div class="field"><label>Category</label><select id="bkCat">${opt(s.categories)}</select></div>
     <button class="btn" onclick="applyBulk()">Apply to ${BULKSEL.size}</button>
     <button class="btn ghost" onclick="clearSel()">Clear</button>
@@ -1051,15 +1065,20 @@ function applyBulk(){
   const g=id=>{const e=document.getElementById(id);return e?e.value:''};
   const cost=g('bkCost'), src=g('bkSource'), date=g('bkDate'), loc=g('bkLoc'), cat=g('bkCat');
   if(cost===''&&!src&&!date&&!loc&&!cat){ alert('Fill in at least one field — only the fields you set get applied.'); return; }
+  let pend=0;
   DATA.items.forEach(it=>{
     if(!BULKSEL.has(it.id)) return;
     if(cost!=='') it.cost=num(cost);
     if(src) it.source=src;
     if(date) it.purchaseDate=date;
-    if(loc) it.location=loc;
+    if(loc){ /* MOJO_B119_SKUPUSH: live eBay listings get the new label pushed to eBay */
+      if(it.ebayItemId && it.status==='listed' && loc!==(it.sku||'')){ it.pendingSku=loc; it.sku=loc; pend++; }
+      it.location=loc;
+    }
     if(cat) it.category=cat;
   });
   save(); BULKSEL.clear(); render();
+  if(pend) alert(pend+' live listing(s) queued for an eBay custom-label update — hit Push, and the next hourly sync applies them (or run the workflow manually).');
 }
 function buildAcctSwitch(){
   const el=document.getElementById('acctSwitch');
