@@ -195,7 +195,7 @@
       <a data-view="settings"><span class="ic">⚙</span> Settings</a>
       <a id="calcNav"><span class="ic">%</span> Price calc</a>
     </nav>
-    <div class="side-foot">Mojonator v1.0 (b119)<br>Local · GitHub-sync ready</div>
+    <div class="side-foot">Mojonator v1.0 (b120)<br>Local · GitHub-sync ready</div>
   </aside>
 
   <!-- Main -->
@@ -494,6 +494,17 @@ function chartOpts(noLegend){ return {responsive:true,maintainAspectRatio:false,
 function isUnsold(it){ return it.status!=='sold' && it.status!=='shipped' && it.status!=='returned'; }
 function daysSince(d){ return d ? Math.max(0, daysBetween(d, todayISO())) : 0; }
 function invSearchMatch(it,q){ return !q || [it.sku,it.itemId,it.title,it.location,it.source,it.category,(it.tags||[]).join(' ')].join(' ').toLowerCase().includes(q); }
+/* MOJO_B120_SEARCHFOCUS: re-rendering the view rebuilds the search input, which
+   used to drop focus after every letter — refocus it with the caret at the end. */
+function invSearchWire(c,rerender){
+  const si=document.getElementById('invSearch');
+  if(si) si.addEventListener('input',e=>{
+    STATE.invFilter=e.target.value;
+    rerender(c);
+    const n=document.getElementById('invSearch');
+    if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); }
+  });
+}
 
 function renderListed(c){
   const q=(STATE.invFilter||'').toLowerCase();
@@ -511,7 +522,7 @@ function renderListed(c){
     <tbody>${items.map(rowListed).join('')||emptyRow(15,'Nothing listed yet. Connect eBay or add an item.')}</tbody>
   </table></div></div>
   <div class="muted" style="margin-top:10px">${items.length} listed · ${money(items.reduce((s,it)=>s+num(it.cost),0))} cost tied up · ${money(items.reduce((s,it)=>s+num(it.askingPrice),0))} asking</div>`;
-  const si=document.getElementById('invSearch'); if(si) si.addEventListener('input',e=>{STATE.invFilter=e.target.value; renderListed(c);});
+  invSearchWire(c,renderListed);
 }
 function rowListed(it){
   return `<tr>
@@ -562,7 +573,7 @@ function renderUnlisted(c){
     <tbody>${items.map(rowUnlisted).join('')||emptyRow(12,'No on-hand items. Click Add item to log something you sourced.')}</tbody>
   </table></div></div>
   <div class="muted" style="margin-top:10px">${items.length} on hand · ${money(items.reduce((s,it)=>s+num(it.cost),0))} cost tied up</div>`;
-  const si=document.getElementById('invSearch'); if(si) si.addEventListener('input',e=>{STATE.invFilter=e.target.value; renderUnlisted(c);});
+  invSearchWire(c,renderUnlisted);
 }
 function rowUnlisted(it){
   return `<tr>
