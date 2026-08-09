@@ -98,6 +98,8 @@
   th{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);cursor:pointer;user-select:none}
   th:hover{color:var(--green-dark)}
   tbody tr:hover{background:var(--green-soft)}
+  tbody tr.rowsel{background:var(--green-soft);box-shadow:inset 2px 0 0 var(--green)}
+  tbody tr.rowsel:hover{background:var(--green-soft)}
   td.num,th.num{text-align:right}
   .tag{display:inline-block;background:var(--green-light);color:var(--green-dark);border-radius:20px;padding:2px 9px;font-size:11px;font-weight:600;margin:1px 2px}
   .status{display:inline-block;border-radius:20px;padding:2px 10px;font-size:11px;font-weight:700}
@@ -195,7 +197,7 @@
       <a data-view="settings"><span class="ic">⚙</span> Settings</a>
       <a id="calcNav"><span class="ic">%</span> Price calc</a>
     </nav>
-    <div class="side-foot">Mojonator v1.0 (b120)<br>Local · GitHub-sync ready</div>
+    <div class="side-foot">Mojonator v1.0 (b121)<br>Local · GitHub-sync ready</div>
   </aside>
 
   <!-- Main -->
@@ -525,11 +527,11 @@ function renderListed(c){
   invSearchWire(c,renderListed);
 }
 function rowListed(it){
-  return `<tr>
+  return `<tr class="${BULKSEL.has(it.id)?'rowsel':''}" onclick="rowClick(event,'${it.id}')" ondblclick="editItem('${it.id}')" style="cursor:pointer">
     <td class="selcell"><input type="checkbox" ${BULKSEL.has(it.id)?'checked':''} onclick="toggleSel('${it.id}',this.checked)"></td>
-    <td onclick="editItem('${it.id}')" style="cursor:pointer"><strong>${esc(it.sku||'—')}</strong></td>
-    <td onclick="editItem('${it.id}')" style="cursor:pointer">${esc(it.itemId||'—')}</td>
-    <td class="cell-title" title="${esc(it.title||'')}" onclick="editItem('${it.id}')" style="cursor:pointer">${esc(it.title||'')}</td>
+    <td><strong>${esc(it.sku||'—')}</strong></td>
+    <td>${esc(it.itemId||'—')}</td>
+    <td class="cell-title" title="${esc(it.title||'')}">${esc(it.title||'')}</td>
     <td><span class="acct-badge acct-${it.account}">${esc(acctName(it.account))}</span></td>
     <td class="num">${it.cost?money(num(it.cost)):'—'}</td>
     <td>${esc(it.source||'—')}</td>
@@ -576,11 +578,11 @@ function renderUnlisted(c){
   invSearchWire(c,renderUnlisted);
 }
 function rowUnlisted(it){
-  return `<tr>
+  return `<tr class="${BULKSEL.has(it.id)?'rowsel':''}" onclick="rowClick(event,'${it.id}')" ondblclick="editItem('${it.id}')" style="cursor:pointer">
     <td class="selcell"><input type="checkbox" ${BULKSEL.has(it.id)?'checked':''} onclick="toggleSel('${it.id}',this.checked)"></td>
-    <td onclick="editItem('${it.id}')" style="cursor:pointer"><strong>${esc(it.sku||'—')}</strong></td>
-    <td onclick="editItem('${it.id}')" style="cursor:pointer">${esc(it.itemId||'—')}</td>
-    <td class="cell-title" title="${esc(it.title||'')}" onclick="editItem('${it.id}')" style="cursor:pointer">${esc(it.title||'')} ${(it.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</td>
+    <td><strong>${esc(it.sku||'—')}</strong></td>
+    <td>${esc(it.itemId||'—')}</td>
+    <td class="cell-title" title="${esc(it.title||'')}">${esc(it.title||'')} ${(it.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</td>
     <td><span class="acct-badge acct-${it.account}">${esc(acctName(it.account))}</span></td>
     <td class="num">${it.cost?money(num(it.cost)):'—'}</td>
     <td>${esc(it.source||'—')}</td>
@@ -1050,13 +1052,35 @@ function clearAll(){ if(confirm('Delete ALL items? This cannot be undone.')){ DA
 /* ---------------- Helpers + wiring ---------------- */
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function cap(s){ return s?s.charAt(0).toUpperCase()+s.slice(1):''; }
-function go(v){ if(STATE.view!==v) BULKSEL.clear(); STATE.view=v; render(); }
+function go(v){ if(STATE.view!==v){ BULKSEL.clear(); SEL_ANCHOR=null; } STATE.view=v; render(); }
 
 /* ---------------- Bulk edit ---------------- */
 const BULKSEL=new Set();
-function toggleSel(id,on){ if(on)BULKSEL.add(id); else BULKSEL.delete(id); render(); }
+let SEL_ANCHOR=null; // MOJO_B121_MULTISEL: last row clicked w/o a modifier, for shift-range select
+function toggleSel(id,on){ if(on)BULKSEL.add(id); else BULKSEL.delete(id); SEL_ANCHOR=id; render(); }
 function selAllVis(on){ (window.VIS_IDS||[]).forEach(id=>on?BULKSEL.add(id):BULKSEL.delete(id)); render(); }
-function clearSel(){ BULKSEL.clear(); render(); }
+function clearSel(){ BULKSEL.clear(); SEL_ANCHOR=null; render(); }
+/* MOJO_B121_MULTISEL: click a row to select just it, shift-click for a range from the
+   last-clicked row, ctrl/cmd-click to add or remove one row without touching the rest.
+   Checkbox clicks and the Edit button keep their own plain toggle/open behavior.
+   Double-click a row to open it. */
+function rowClick(ev,id){
+  if(ev.target.closest('.selcell') || ev.target.closest('.row-actions')) return;
+  const ids=window.VIS_IDS||[];
+  const idx=ids.indexOf(id);
+  if(ev.shiftKey && SEL_ANCHOR!=null && ids.indexOf(SEL_ANCHOR)>-1 && idx>-1){
+    const a=ids.indexOf(SEL_ANCHOR);
+    const [lo,hi]=a<idx?[a,idx]:[idx,a];
+    BULKSEL.clear();
+    for(let i=lo;i<=hi;i++) BULKSEL.add(ids[i]);
+  } else if(ev.ctrlKey || ev.metaKey){
+    if(BULKSEL.has(id)) BULKSEL.delete(id); else BULKSEL.add(id);
+    SEL_ANCHOR=id;
+  } else {
+    BULKSEL.clear(); BULKSEL.add(id); SEL_ANCHOR=id;
+  }
+  render();
+}
 function bulkBar(){
   if(!BULKSEL.size) return '';
   const s=DATA.settings;
