@@ -197,7 +197,7 @@
       <a data-view="settings"><span class="ic">⚙</span> Settings</a>
       <a id="calcNav"><span class="ic">%</span> Price calc</a>
     </nav>
-    <div class="side-foot">Mojonator v1.0 (b121)<br>Local · GitHub-sync ready</div>
+    <div class="side-foot">Mojonator v1.0 (b122)<br>Local · GitHub-sync ready</div>
   </aside>
 
   <!-- Main -->
@@ -287,7 +287,7 @@ function save(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(DATA)); localS
 /* Repo data.json is the source of truth. The GitHub Action writes eBay
    sales into it server-side; the app pulls it, you add costs, you push. */
 const EBAY_FIELDS = ['title','salePrice','saleDate','ebayFees','shipCost','status','marketplace','ebayItemId'];
-const MANUAL_FIELDS = ['cost','source','location','category','purchaseDate','tags','custom','notes','consignPartner','consignSplit','itemId','sku','listedDate','refund','otherFees','autoRelist'];
+const MANUAL_FIELDS = ['cost','source','location','category','purchaseDate','tags','custom','notes','consignPartner','consignSplit','itemId','sku','listedDate','refund','otherFees','autoRelist','firstListed'];
 function b64encode(s){ return btoa(unescape(encodeURIComponent(s))); }
 function b64decode(s){ return decodeURIComponent(escape(atob(s.replace(/\s/g,'')))); }
 function ghHeaders(){ const t=DATA.settings.ghToken; return t?{Authorization:'Bearer '+t,Accept:'application/vnd.github+json'}:{Accept:'application/vnd.github+json'}; }
@@ -518,7 +518,7 @@ function renderListed(c){
     <input class="grow" type="text" id="invSearch" placeholder="Search title, item ID, location…" value="${esc(STATE.invFilter||'')}">
     <button class="btn" onclick="newItem()">＋ Add item</button>
   </div>
-  ${bulkBar()}
+  <div id="bulkHost">${bulkBar()}</div>
   <div class="panel"><div class="tablewrap"><table>
     <thead><tr><th class="selcell"><input type="checkbox" ${items.length&&items.every(i=>BULKSEL.has(i.id))?'checked':''} onclick="selAllVis(this.checked)" title="Select all"></th>${th('sku','Custom SKU')}${th('itemId','Item ID')}${th('title','Title')}<th>Acct</th>${th('cost','Purchase $','num')}${th('source','Purchased at')}${th('purchaseDate','Purchased','num')}${th('askingPrice','Asking','num')}${th('location','Location')}${th('category','Category')}${th('listedDate','Listed','num')}<th class="num">Days</th><th class="num" title="Next auto-relist">Relist</th><th></th></tr></thead>
     <tbody>${items.map(rowListed).join('')||emptyRow(15,'Nothing listed yet. Connect eBay or add an item.')}</tbody>
@@ -527,7 +527,7 @@ function renderListed(c){
   invSearchWire(c,renderListed);
 }
 function rowListed(it){
-  return `<tr class="${BULKSEL.has(it.id)?'rowsel':''}" onclick="rowClick(event,'${it.id}')" ondblclick="editItem('${it.id}')" style="cursor:pointer">
+  return `<tr data-id="${it.id}" class="${BULKSEL.has(it.id)?'rowsel':''}" onclick="rowClick(event,'${it.id}')" ondblclick="editItem('${it.id}')" style="cursor:pointer">
     <td class="selcell"><input type="checkbox" ${BULKSEL.has(it.id)?'checked':''} onclick="toggleSel('${it.id}',this.checked)"></td>
     <td><strong>${esc(it.sku||'—')}</strong></td>
     <td>${esc(it.itemId||'—')}</td>
@@ -569,7 +569,7 @@ function renderUnlisted(c){
     <input class="grow" type="text" id="invSearch" placeholder="Search title, item ID, location…" value="${esc(STATE.invFilter||'')}">
     <button class="btn" onclick="newItem()">＋ Add item</button>
   </div>
-  ${bulkBar()}
+  <div id="bulkHost">${bulkBar()}</div>
   <div class="panel"><div class="tablewrap"><table>
     <thead><tr><th class="selcell"><input type="checkbox" ${items.length&&items.every(i=>BULKSEL.has(i.id))?'checked':''} onclick="selAllVis(this.checked)" title="Select all"></th>${th('sku','Custom SKU')}${th('itemId','Item ID')}${th('title','Title')}<th>Acct</th>${th('cost','Purchase $','num')}${th('source','Purchased at')}${th('purchaseDate','Purchased','num')}${th('location','Location')}${th('category','Category')}<th class="num">Days held</th><th></th></tr></thead>
     <tbody>${items.map(rowUnlisted).join('')||emptyRow(12,'No on-hand items. Click Add item to log something you sourced.')}</tbody>
@@ -578,7 +578,7 @@ function renderUnlisted(c){
   invSearchWire(c,renderUnlisted);
 }
 function rowUnlisted(it){
-  return `<tr class="${BULKSEL.has(it.id)?'rowsel':''}" onclick="rowClick(event,'${it.id}')" ondblclick="editItem('${it.id}')" style="cursor:pointer">
+  return `<tr data-id="${it.id}" class="${BULKSEL.has(it.id)?'rowsel':''}" onclick="rowClick(event,'${it.id}')" ondblclick="editItem('${it.id}')" style="cursor:pointer">
     <td class="selcell"><input type="checkbox" ${BULKSEL.has(it.id)?'checked':''} onclick="toggleSel('${it.id}',this.checked)"></td>
     <td><strong>${esc(it.sku||'—')}</strong></td>
     <td>${esc(it.itemId||'—')}</td>
@@ -882,6 +882,27 @@ function fieldHTML(id,label,type,val,opts){
   if(type==='textarea') return `<div class="field full"><label>${label}</label><textarea id="f_${id}" rows="2">${esc(val||'')}</textarea></div>`;
   return `<div class="field"><label>${label}</label><input id="f_${id}" type="${type}" value="${esc(val==null?'':val)}"></div>`;
 }
+/* MOJO_B122_DAYSLISTED: how long an item has been up for sale in total, across
+   relists. item.firstListed is set once and never reset by a relist (the sync only
+   rewrites listedDate). For items that were already relisted before this existed,
+   the first pass estimates it as listedDate minus 30 days per recorded relist. */
+function ensureFirstListed(it){
+  if(!it || it.firstListed || !it.listedDate) return;
+  const d=new Date(it.listedDate+'T00:00:00'); if(isNaN(d)) return;
+  const n=(it.relist&&it.relist.count)||0;
+  d.setDate(d.getDate()-30*n);
+  it.firstListed=d.toISOString().slice(0,10);
+  save();
+}
+function daysListedHTML(it){
+  if(!it || !it.id || it.status!=='listed') return '';
+  ensureFirstListed(it);
+  const start=it.firstListed||it.listedDate; if(!start) return '';
+  const days=Math.max(0,Math.floor((Date.now()-new Date(start+'T00:00:00').getTime())/86400000));
+  const over=days>90;
+  const est=(it.relist&&it.relist.count)?' <span class="muted">(across '+(it.relist.count+1)+' listings)</span>':'';
+  return `<div class="field full" style="margin:-4px 0 2px"><div style="font-weight:700;font-size:15px;color:${over?'#e5484d':'#2fbf71'}">${days} day${days===1?'':'s'} listed${over?' — over 3 months':''}</div><div class="muted" style="font-size:11px">first listed ${esc(start)}${est}</div></div>`;
+}
 function openItemModal(it){
   STATE.editingId=it?it.id:null;
   document.getElementById('modalTitle').textContent = it?'Edit item':'Add item';
@@ -892,6 +913,7 @@ function openItemModal(it){
     fieldHTML('sku','Custom SKU','text',it.sku)+
     fieldHTML('itemId','Item ID','text',it.itemId)+
     fieldHTML('title','Title','text',it.title)+
+    daysListedHTML(it)+
     fieldHTML('account','Account','select',it.account? (s.accounts.find(a=>a.id===it.account)||{}).name : s.accounts[0].name, s.accounts.map(a=>a.name))+
     fieldHTML('category','Category','select',it.category||s.categories[0],s.categories)+
     fieldHTML('location','Location','select',it.location||s.locations[0],(it.location&&!s.locations.includes(it.location))?[it.location].concat(s.locations):s.locations)+
@@ -1079,7 +1101,20 @@ function rowClick(ev,id){
   } else {
     BULKSEL.clear(); BULKSEL.add(id); SEL_ANCHOR=id;
   }
-  render();
+  paintSel();
+}
+/* MOJO_B122_DBLCLICK_FIX: repaint selection without rebuilding the table. A full
+   render() swapped out the <tr> between the two clicks of a double-click, so the
+   browser never fired dblclick and the edit popup stopped opening. */
+function paintSel(){
+  document.querySelectorAll('tr[data-id]').forEach(tr=>{
+    const on=BULKSEL.has(tr.dataset.id);
+    tr.classList.toggle('rowsel',on);
+    const cb=tr.querySelector('.selcell input'); if(cb) cb.checked=on;
+  });
+  const all=document.querySelector('thead .selcell input');
+  if(all){ const ids=window.VIS_IDS||[]; all.checked=ids.length>0&&ids.every(i=>BULKSEL.has(i)); }
+  const host=document.getElementById('bulkHost'); if(host) host.innerHTML=bulkBar();
 }
 function bulkBar(){
   if(!BULKSEL.size) return '';
