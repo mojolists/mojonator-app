@@ -117,6 +117,10 @@
   .tablewrap::-webkit-scrollbar-thumb{background:#9aa7b5;border-radius:7px;border:3px solid #eef2f7}
   .tablewrap::-webkit-scrollbar-thumb:hover{background:#6b7a89}
   .cell-title{max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* MOJO_B123_TIGHTCOLS: narrow SKU + purchased-date columns */
+  .tight{padding-left:7px;padding-right:7px}
+  .cell-sku{max-width:84px;overflow:hidden;text-overflow:ellipsis}
+  .cell-date{font-size:12px;color:var(--muted,#8a9)}
   table th, table td{white-space:nowrap}
   .muted{color:var(--muted)}
   .right{text-align:right}
@@ -197,7 +201,7 @@
       <a data-view="settings"><span class="ic">⚙</span> Settings</a>
       <a id="calcNav"><span class="ic">%</span> Price calc</a>
     </nav>
-    <div class="side-foot">Mojonator v1.0 (b122)<br>Local · GitHub-sync ready</div>
+    <div class="side-foot">Mojonator v1.0 (b123)<br>Local · GitHub-sync ready</div>
   </aside>
 
   <!-- Main -->
@@ -520,8 +524,8 @@ function renderListed(c){
   </div>
   <div id="bulkHost">${bulkBar()}</div>
   <div class="panel"><div class="tablewrap"><table>
-    <thead><tr><th class="selcell"><input type="checkbox" ${items.length&&items.every(i=>BULKSEL.has(i.id))?'checked':''} onclick="selAllVis(this.checked)" title="Select all"></th>${th('sku','Custom SKU')}${th('itemId','Item ID')}${th('title','Title')}<th>Acct</th>${th('cost','Purchase $','num')}${th('source','Purchased at')}${th('purchaseDate','Purchased','num')}${th('askingPrice','Asking','num')}${th('location','Location')}${th('category','Category')}${th('listedDate','Listed','num')}<th class="num">Days</th><th class="num" title="Next auto-relist">Relist</th><th></th></tr></thead>
-    <tbody>${items.map(rowListed).join('')||emptyRow(15,'Nothing listed yet. Connect eBay or add an item.')}</tbody>
+    <thead><tr><th class="selcell"><input type="checkbox" ${items.length&&items.every(i=>BULKSEL.has(i.id))?'checked':''} onclick="selAllVis(this.checked)" title="Select all"></th>${th('sku','SKU','tight')}${th('itemId','Item ID')}${th('title','Title')}<th>Acct</th>${th('cost','Purchase $','num')}${th('source','Purchased at')}${th('purchaseDate','Bought','num tight')}${th('askingPrice','Asking','num')}${th('listedDate','Listed','num')}<th class="num">Days</th><th class="num" title="Next auto-relist">Relist</th><th></th></tr></thead>
+    <tbody>${items.map(rowListed).join('')||emptyRow(13,'Nothing listed yet. Connect eBay or add an item.')}</tbody>
   </table></div></div>
   <div class="muted" style="margin-top:10px">${items.length} listed · ${money(items.reduce((s,it)=>s+num(it.cost),0))} cost tied up · ${money(items.reduce((s,it)=>s+num(it.askingPrice),0))} asking</div>`;
   invSearchWire(c,renderListed);
@@ -529,16 +533,14 @@ function renderListed(c){
 function rowListed(it){
   return `<tr data-id="${it.id}" class="${BULKSEL.has(it.id)?'rowsel':''}" onclick="rowClick(event,'${it.id}')" ondblclick="editItem('${it.id}')" style="cursor:pointer">
     <td class="selcell"><input type="checkbox" ${BULKSEL.has(it.id)?'checked':''} onclick="toggleSel('${it.id}',this.checked)"></td>
-    <td><strong>${esc(it.sku||'—')}</strong></td>
+    <td class="tight cell-sku" title="${esc(it.sku||'')}"><strong>${esc(it.sku||'—')}</strong>${it.pendingSku!=null?(it.pendingSkuErr?` <span title="eBay label update FAILED: ${esc(it.pendingSkuErr)} — will retry next sync" style="color:var(--red)">⚠</span>`:' <span title="Label update queued — applies to eBay on the next sync after you Push" class="muted">⏳</span>'):''}</td>
     <td>${esc(it.itemId||'—')}</td>
     <td class="cell-title" title="${esc(it.title||'')}">${esc(it.title||'')}</td>
     <td><span class="acct-badge acct-${it.account}">${esc(acctName(it.account))}</span></td>
     <td class="num">${it.cost?money(num(it.cost)):'—'}</td>
     <td>${esc(it.source||'—')}</td>
-    <td class="num">${it.purchaseDate||'—'}</td>
+    <td class="num tight cell-date" title="${esc(it.purchaseDate||'')}">${shortDate(it.purchaseDate)}</td>
     <td class="num">${it.askingPrice?money(num(it.askingPrice)):'—'}</td>
-    <td>${esc(it.location||'—')}${it.pendingSku!=null?(it.pendingSkuErr?` <span title="eBay label update FAILED: ${esc(it.pendingSkuErr)} — will retry next sync" style="color:var(--red)">⚠</span>`:' <span title="Label update queued — applies to eBay on the next sync after you Push" class="muted">⏳</span>'):''}</td>
-    <td>${esc(it.category||'—')}</td>
     <td class="num">${it.listedDate||'—'}</td>
     <td class="num">${daysSince(it.listedDate)}</td>
     <td class="num">${relistCell(it)}</td>
@@ -571,8 +573,8 @@ function renderUnlisted(c){
   </div>
   <div id="bulkHost">${bulkBar()}</div>
   <div class="panel"><div class="tablewrap"><table>
-    <thead><tr><th class="selcell"><input type="checkbox" ${items.length&&items.every(i=>BULKSEL.has(i.id))?'checked':''} onclick="selAllVis(this.checked)" title="Select all"></th>${th('sku','Custom SKU')}${th('itemId','Item ID')}${th('title','Title')}<th>Acct</th>${th('cost','Purchase $','num')}${th('source','Purchased at')}${th('purchaseDate','Purchased','num')}${th('location','Location')}${th('category','Category')}<th class="num">Days held</th><th></th></tr></thead>
-    <tbody>${items.map(rowUnlisted).join('')||emptyRow(12,'No on-hand items. Click Add item to log something you sourced.')}</tbody>
+    <thead><tr><th class="selcell"><input type="checkbox" ${items.length&&items.every(i=>BULKSEL.has(i.id))?'checked':''} onclick="selAllVis(this.checked)" title="Select all"></th>${th('sku','SKU','tight')}${th('itemId','Item ID')}${th('title','Title')}<th>Acct</th>${th('cost','Purchase $','num')}${th('source','Purchased at')}${th('purchaseDate','Bought','num tight')}<th class="num">Days held</th><th></th></tr></thead>
+    <tbody>${items.map(rowUnlisted).join('')||emptyRow(10,'No on-hand items. Click Add item to log something you sourced.')}</tbody>
   </table></div></div>
   <div class="muted" style="margin-top:10px">${items.length} on hand · ${money(items.reduce((s,it)=>s+num(it.cost),0))} cost tied up</div>`;
   invSearchWire(c,renderUnlisted);
@@ -580,15 +582,13 @@ function renderUnlisted(c){
 function rowUnlisted(it){
   return `<tr data-id="${it.id}" class="${BULKSEL.has(it.id)?'rowsel':''}" onclick="rowClick(event,'${it.id}')" ondblclick="editItem('${it.id}')" style="cursor:pointer">
     <td class="selcell"><input type="checkbox" ${BULKSEL.has(it.id)?'checked':''} onclick="toggleSel('${it.id}',this.checked)"></td>
-    <td><strong>${esc(it.sku||'—')}</strong></td>
+    <td class="tight cell-sku" title="${esc(it.sku||'')}"><strong>${esc(it.sku||'—')}</strong></td>
     <td>${esc(it.itemId||'—')}</td>
     <td class="cell-title" title="${esc(it.title||'')}">${esc(it.title||'')} ${(it.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</td>
     <td><span class="acct-badge acct-${it.account}">${esc(acctName(it.account))}</span></td>
     <td class="num">${it.cost?money(num(it.cost)):'—'}</td>
     <td>${esc(it.source||'—')}</td>
-    <td class="num">${it.purchaseDate||'—'}</td>
-    <td>${esc(it.location||'—')}</td>
-    <td>${esc(it.category||'—')}</td>
+    <td class="num tight cell-date" title="${esc(it.purchaseDate||'')}">${shortDate(it.purchaseDate)}</td>
     <td class="num">${daysInStock(it)}</td>
     <td class="row-actions"><button class="icon-btn" onclick="editItem('${it.id}')">Edit</button></td>
   </tr>`;
@@ -598,6 +598,8 @@ function sortItems(items){
   const val=it=> key==='_days'?daysInStock(it): key==='_net'?(netProfit(it)??-1e15): key==='_roi'?(roi(it)??-1e15): key==='cost'?num(it.cost): (it[key]||'');
   return items.sort((a,b)=>{ const x=val(a),y=val(b); if(x<y)return -1*dir; if(x>y)return 1*dir; return 0; });
 }
+/* MOJO_B123_TIGHTCOLS: 2026-08-30 -> 8/30/26 for the narrow Bought column */
+function shortDate(d){ if(!d) return '—'; const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(d); return m?(+m[2])+'/'+(+m[3])+'/'+m[1].slice(2):esc(d); }
 function th(key,label,cls){ const active=STATE.sort.key===key; const arrow=active?(STATE.sort.dir>0?' ▲':' ▼'):''; return `<th class="${cls||''}" onclick="setSort('${key}')">${label}${arrow}</th>`; }
 function setSort(k){ if(STATE.sort.key===k)STATE.sort.dir*=-1; else STATE.sort={key:k,dir:1}; render(); }
 function emptyRow(cols,msg){ return `<tr><td colspan="${cols}" class="empty"><div class="big">▦</div>${msg||'No items yet. Click <strong>Add item</strong> or load sample data in Import / Export.'}</td></tr>`; }
