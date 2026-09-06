@@ -121,6 +121,12 @@
   .tight{padding-left:7px;padding-right:7px}
   .cell-sku{max-width:84px;overflow:hidden;text-overflow:ellipsis}
   .cell-date{font-size:12px;color:var(--muted,#8a9)}
+  /* MOJO_B124_MEDIA: media-type pills + breakdown table */
+  .media{display:inline-block;font-size:11px;font-weight:700;padding:2px 7px;border-radius:999px;border:1px solid var(--line);background:#f1f5f9;color:#334155;letter-spacing:.2px}
+  .media-CD{background:#e0f2fe;color:#075985;border-color:#bae6fd} .media-DVD{background:#fef3c7;color:#92400e;border-color:#fde68a}
+  .media-Blu-ray{background:#dbeafe;color:#1e3a8a;border-color:#bfdbfe} .media-Cassette{background:#fce7f3;color:#9d174d;border-color:#fbcfe8}
+  .media-Vinyl{background:#ede9fe;color:#5b21b6;border-color:#ddd6fe} .media-Other{background:#f1f5f9;color:#475569}
+  tr.mediarow{cursor:pointer} tr.mediarow.on td{background:#ecfdf5} .mediabar{height:6px;border-radius:3px;background:#2fbf71;display:inline-block;vertical-align:middle;margin-left:8px;opacity:.85}
   table th, table td{white-space:nowrap}
   .muted{color:var(--muted)}
   .right{text-align:right}
@@ -201,7 +207,7 @@
       <a data-view="settings"><span class="ic">⚙</span> Settings</a>
       <a id="calcNav"><span class="ic">%</span> Price calc</a>
     </nav>
-    <div class="side-foot">Mojonator v1.0 (b123)<br>Local · GitHub-sync ready</div>
+    <div class="side-foot">Mojonator v1.0 (b124)<br>Local · GitHub-sync ready</div>
   </aside>
 
   <!-- Main -->
@@ -266,7 +272,7 @@ const DEFAULT_DATA = {
 };
 
 let DATA = load();
-let STATE = { view:'dashboard', account:'all', range:'90', sort:{key:'purchaseDate',dir:-1}, invFilter:'', editingId:null };
+let STATE = { view:'dashboard', account:'all', range:'90', sort:{key:'purchaseDate',dir:-1}, invFilter:'', editingId:null, mediaFilter:'' };
 let charts = {};
 
 function load(){
@@ -423,6 +429,42 @@ function render(){
 function destroyCharts(){ Object.values(charts).forEach(ch=>{try{ch.destroy()}catch(e){}}); charts={}; }
 
 /* ---------------- Dashboard ---------------- */
+/* MOJO_B124_MEDIA: media type is inferred from the eBay title (there is no format
+   field in the data). item.media, if ever set, overrides the guess. SACD counts as CD. */
+const MEDIA_ORDER=['CD','DVD','Blu-ray','Cassette','Vinyl','Other'];
+function mediaType(it){
+  if(it.media) return it.media;
+  const t=(it.title||'').toLowerCase();
+  if(/blu[- ]?ray|\bbd\b|4k uhd|\buhd\b|\b4k\b/.test(t)) return 'Blu-ray';
+  if(/\bdvd|dvds\b|dvd audio/.test(t)) return 'DVD';
+  if(/cassette|\btape\b/.test(t)) return 'Cassette';
+  if(/\bsacd\b|hybrid|\bcd\b|\bcds\b|\d ?cd\b|compact disc|hdcd|digipak|\bdisc\b/.test(t)) return 'CD';
+  if(/vinyl|\blp\b|\b45\b|record/.test(t)) return 'Vinyl';
+  return 'Other';
+}
+function isSACD(it){ return /\bsacd\b/i.test(it.title||''); }
+function mediaPill(it){ const m=mediaType(it); return `<span class="media media-${m}">${m==='CD'&&isSACD(it)?'SACD':m}</span>`; }
+function mediaBreakdownHTML(sold,opts){
+  opts=opts||{};
+  const rows={}; MEDIA_ORDER.forEach(m=>rows[m]={n:0,gross:0,net:0,sacd:0});
+  sold.forEach(it=>{ const r=rows[mediaType(it)]; r.n++; r.gross+=num(it.salePrice); r.net+=(netProfit(it)||0); if(isSACD(it)) r.sacd++; });
+  const media=MEDIA_ORDER.filter(m=>m!=='Other'&&rows[m].n);
+  const totalN=media.reduce((s,m)=>s+rows[m].n,0);
+  const maxN=Math.max(1,...media.map(m=>rows[m].n));
+  const tr=m=>{ const r=rows[m]; const share=totalN?r.n/totalN*100:0; const on=opts.filter===m;
+    return `<tr class="mediarow ${on?'on':''}" ${opts.clickable?`onclick="setMediaFilter('${m}')" title="Click to show only ${m} sales"`:''}>
+      <td><span class="media media-${m}">${m}</span>${m==='CD'&&r.sacd?` <span class="muted" style="font-size:11px">incl. ${r.sacd} SACD</span>`:''}</td>
+      <td class="num"><strong>${r.n}</strong></td>
+      <td class="num">${share.toFixed(0)}%<span class="mediabar" style="width:${Math.round(r.n/maxN*60)}px"></span></td>
+      <td class="num">${money(r.gross)}</td><td class="num">${money(r.n?r.gross/r.n:0)}</td>
+      <td class="num ${r.net>=0?'pos':'neg'}">${money(r.net)}</td></tr>`; };
+  const other=rows.Other.n?`<tr class="mediarow ${opts.filter==='Other'?'on':''}" ${opts.clickable?`onclick="setMediaFilter('Other')"`:''}><td><span class="media media-Other">Other</span> <span class="muted" style="font-size:11px">non-media</span></td><td class="num">${rows.Other.n}</td><td class="num">—</td><td class="num">${money(rows.Other.gross)}</td><td class="num">${money(rows.Other.gross/rows.Other.n)}</td><td class="num ${rows.Other.net>=0?'pos':'neg'}">${money(rows.Other.net)}</td></tr>`:'';
+  const totGross=media.reduce((s,m)=>s+rows[m].gross,0), totNet=media.reduce((s,m)=>s+rows[m].net,0);
+  return `<div class="panel"><div class="panel-head"><h2>Sales by media</h2><div class="spacer"></div>${opts.filter?`<a onclick="setMediaFilter('')">Clear filter ×</a>`:`<span class="muted" style="font-size:12px">${opts.clickable?'click a row to filter · ':''}from titles</span>`}</div>
+    <div class="tablewrap"><table><thead><tr><th>Media</th><th class="num">Sold</th><th class="num">Share</th><th class="num">Gross</th><th class="num">Avg sale</th><th class="num">Net</th></tr></thead>
+    <tbody>${media.map(tr).join('')}${other}${media.length?`<tr><td><strong>Media total</strong></td><td class="num"><strong>${totalN}</strong></td><td class="num"></td><td class="num"><strong>${money(totGross)}</strong></td><td class="num">${money(totalN?totGross/totalN:0)}</td><td class="num ${totNet>=0?'pos':'neg'}"><strong>${money(totNet)}</strong></td></tr>`:''}${!sold.length?`<tr><td colspan="6" class="muted" style="text-align:center;padding:20px">No sales in range.</td></tr>`:''}</tbody></table></div></div>`;
+}
+function setMediaFilter(m){ STATE.mediaFilter = (STATE.mediaFilter===m||!m) ? '' : m; render(); }
 function renderDashboard(c){
   if(!DATA.items.length && !DATA.settings.ghToken){
     c.innerHTML=`<div class="panel"><div class="panel-body" style="padding:28px">
@@ -461,6 +503,7 @@ function renderDashboard(c){
     <div class="panel"><div class="panel-head"><h2>Gross vs. net over time</h2></div><div class="panel-body"><canvas id="trendChart" height="220"></canvas></div></div>
     <div class="panel"><div class="panel-head"><h2>Net profit by source</h2></div><div class="panel-body"><canvas id="sourceChart" height="220"></canvas></div></div>
   </div>
+  ${mediaBreakdownHTML(sold)}
   <div class="panel">
     <div class="panel-head"><h2>Recent sales</h2><div class="spacer"></div><a onclick="go('sales')">View all →</a></div>
     <div class="tablewrap"><table><thead><tr><th>Item ID</th><th>Title</th><th>Acct</th><th>Sold</th><th class="num">Sale</th><th class="num">Net</th><th class="num">ROI</th></tr></thead>
@@ -606,7 +649,8 @@ function emptyRow(cols,msg){ return `<tr><td colspan="${cols}" class="empty"><di
 
 /* ---------------- Sales ---------------- */
 function renderSales(c){
-  const sold=soldInRange().slice().sort((a,b)=>(b.saleDate||'').localeCompare(a.saleDate||''));
+  const allSold=soldInRange().slice().sort((a,b)=>(b.saleDate||'').localeCompare(a.saleDate||''));
+  const sold=STATE.mediaFilter?allSold.filter(it=>mediaType(it)===STATE.mediaFilter):allSold;
   const gross=sold.reduce((s,it)=>s+num(it.salePrice),0);
   const net=sold.reduce((s,it)=>s+(netProfit(it)||0),0);
   const fees=sold.reduce((s,it)=>s+num(it.ebayFees)+num(it.otherFees),0);
@@ -616,16 +660,18 @@ function renderSales(c){
     ${kpi('Gross',money0(gross),'','')}${kpi('Net profit',money0(net),net>=0?'pos':'neg','')}
     ${kpi('Fees',money0(fees),'neg','')}${kpi('Shipping',money0(ship),'neg','')}
   </div>
-  <div class="panel"><div class="panel-head"><h2>Sales (${sold.length})</h2></div><div class="tablewrap"><table>
-    <thead><tr><th>Item ID</th><th>Title</th><th>Acct</th><th>Marketplace</th><th>Sold</th><th>Location</th>
+  ${mediaBreakdownHTML(allSold,{clickable:true,filter:STATE.mediaFilter})}
+  <div class="panel"><div class="panel-head"><h2>Sales (${sold.length})${STATE.mediaFilter?` <span class="media media-${STATE.mediaFilter}">${STATE.mediaFilter}</span>`:''}</h2>${STATE.mediaFilter?`<div class="spacer"></div><a onclick="setMediaFilter('')">Show all ×</a>`:''}</div><div class="tablewrap"><table>
+    <thead><tr><th>Item ID</th><th>Title</th><th>Media</th><th>Acct</th><th>Marketplace</th><th>Sold</th><th>Location</th>
       <th class="num">Sale</th><th class="num">Fees</th><th class="num">Ship</th><th class="num">Cost</th><th class="num">Net</th><th class="num">ROI</th></tr></thead>
     <tbody>${sold.map(it=>`<tr onclick="editItem('${it.id}')" style="cursor:pointer">
       <td><strong>${esc(it.itemId||'—')}</strong></td><td class="cell-title" title="${esc(it.title||'')}">${esc(it.title||'')}</td>
+      <td>${mediaPill(it)}</td>
       <td><span class="acct-badge acct-${it.account}">${esc(acctName(it.account))}</span></td>
       <td>${esc(it.marketplace||'eBay')}</td><td>${it.saleDate||'—'}</td><td>${esc(it.location||'—')}</td><!--MOJO_V114_SALESLOC-->
       <td class="num">${money(num(it.salePrice))}</td><td class="num neg">${money(num(it.ebayFees)+num(it.otherFees))}</td>
       <td class="num neg">${money(num(it.shipCost))}</td><td class="num">${money(num(it.cost))}</td>
-      <td class="num ${netProfit(it)>=0?'pos':'neg'}">${money(netProfit(it))}</td><td class="num">${pct(roi(it))}</td></tr>`).join('')||emptyRow(12)}</tbody>
+      <td class="num ${netProfit(it)>=0?'pos':'neg'}">${money(netProfit(it))}</td><td class="num">${pct(roi(it))}</td></tr>`).join('')||emptyRow(13)}</tbody>
   </table></div></div>`;
 }
 
