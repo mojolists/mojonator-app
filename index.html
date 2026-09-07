@@ -207,7 +207,7 @@
       <a data-view="settings"><span class="ic">⚙</span> Settings</a>
       <a id="calcNav"><span class="ic">%</span> Price calc</a>
     </nav>
-    <div class="side-foot">Mojonator v1.0 (b124)<br>Local · GitHub-sync ready</div>
+    <div class="side-foot">Mojonator v1.0 (b125)<br>Local · GitHub-sync ready</div>
   </aside>
 
   <!-- Main -->
@@ -331,7 +331,7 @@ function clientMerge(incoming){ /* MOJO_V113_MERGEFIX */
       if(m.pendingSku!=null && inc.sku===m.pendingSku){ delete m.pendingSku; delete m.pendingSkuErr; }
       if(inc.ebayItemId && inc.sku && m.pendingSku==null){ m.sku=inc.sku; if(inc.location && inc.location===inc.sku) m.location=inc.location; }
       if(inc.pendingSkuErr && m.pendingSku!=null) m.pendingSkuErr=inc.pendingSkuErr;
-      EBAY_FIELDS.forEach(f=>{ if(inc[f]!==''&&inc[f]!=null) m[f]=inc[f]; });
+      EBAY_FIELDS.forEach(f=>{ if(inc[f]!==''&&inc[f]!=null){ if(f==='status'&&m.status==='bundled'&&!isSold(inc)) return; /* MOJO_B125: a local bundling sticks until pushed */ m[f]=inc[f]; } });
       MANUAL_FIELDS.forEach(f=>{ const empty=(m[f]===''||m[f]==null||(Array.isArray(m[f])&&!m[f].length)); if(empty && inc[f]!=null && inc[f]!=='') m[f]=inc[f]; });
       updated++;
     } else { DATA.items.push(inc); added++; }
@@ -483,7 +483,7 @@ function renderDashboard(c){
   const gross=sold.reduce((s,it)=>s+num(it.salePrice),0);
   const net=sold.reduce((s,it)=>s+(netProfit(it)||0),0);
   const units=sold.length;
-  const invItems=acctItems().filter(it=>!isSold(it)&&it.status!=='returned');
+  const invItems=acctItems().filter(it=>!isSold(it)&&it.status!=='returned'&&it.status!=='bundled'); /* MOJO_B125_BUNDLES: components live inside their bundle item */
   const cashIn=invItems.reduce((s,it)=>s+num(it.cost),0);
   const rois=sold.map(roi).filter(x=>x!=null);
   const avgRoi=rois.length?rois.reduce((a,b)=>a+b,0)/rois.length:null;
@@ -540,7 +540,7 @@ function drawSource(sold){
 function chartOpts(noLegend){ return {responsive:true,maintainAspectRatio:false,plugins:{legend:{display:!noLegend,position:'bottom'}},scales:{y:{ticks:{callback:v=>'$'+v}}}}; }
 
 /* ---------------- Listed / Unlisted inventory ---------------- */
-function isUnsold(it){ return it.status!=='sold' && it.status!=='shipped' && it.status!=='returned'; }
+function isUnsold(it){ return it.status!=='sold' && it.status!=='shipped' && it.status!=='returned' && it.status!=='bundled'; }
 function daysSince(d){ return d ? Math.max(0, daysBetween(d, todayISO())) : 0; }
 function invSearchMatch(it,q){ return !q || [it.sku,it.itemId,it.title,it.location,it.source,it.category,(it.tags||[]).join(' ')].join(' ').toLowerCase().includes(q); }
 /* MOJO_B120_SEARCHFOCUS: re-rendering the view rebuilds the search input, which
@@ -968,7 +968,8 @@ function openItemModal(it){
     fieldHTML('source','Source','select',it.source||s.sources[0],s.sources)+
     fieldHTML('cost','Cost ($)','number',it.cost)+
     fieldHTML('purchaseDate','Purchase date','date',it.purchaseDate)+
-    fieldHTML('status','Status','select',it.status,['sourced','listed','sold','shipped','returned'])+
+    fieldHTML('status','Status','select',it.status,['sourced','listed','sold','shipped','returned','bundled'])+
+    bundleInfoHTML(it)+
     fieldHTML('listedDate','Listed date','date',it.listedDate)+
     fieldHTML('askingPrice','Asking price ($)','number',it.askingPrice)+
     fieldHTML('autoRelist','Auto-relist','select',it.autoRelist===false?'No':'Yes',['Yes','No'])+
@@ -1176,8 +1177,68 @@ function bulkBar(){
     <div class="field"><label>Location</label><input id="bkLoc" list="bkLocList" placeholder="— leave as is —" style="width:130px"><datalist id="bkLocList">${s.locations.map(x=>`<option>${esc(x)}</option>`).join('')}</datalist></div>
     <div class="field"><label>Category</label><select id="bkCat">${opt(s.categories)}</select></div>
     <button class="btn" onclick="applyBulk()">Apply to ${BULKSEL.size}</button>
+    <button class="btn" onclick="bundleSelected()" title="Combine the selected items into one bundle item (MOJO_B125)">&#128230; Bundle ${BULKSEL.size}</button>
     <button class="btn ghost" onclick="clearSel()">Clear</button>
   </div>`;
+}
+/* MOJO_B125_BUNDLES: several inventory items become one sellable bundle item.
+   Components keep their record (and their live eBay item ID, so the singles can
+   still be ended) but move to status "bundled" and drop out of Listed / Unlisted /
+   cash-in-inventory. The bundle item carries bundleOf=[component ids] and a unique
+   SKU that doubles as the eBay custom label of the bundle listing, which is how the
+   hourly sync links the new eBay listing back to this item. */
+function bundleSelected(){
+  const ids=[...BULKSEL]; const items=ids.map(id=>DATA.items.find(x=>x.id===id)).filter(Boolean);
+  if(items.length<2){ alert('Select at least two items to bundle.'); return; }
+  if(items.some(it=>it.status==='bundled'||it.bundleOf)){ alert('One of the selected items is already a bundle or part of one.'); return; }
+  const accts=[...new Set(items.map(it=>it.account))]; if(accts.length>1){ alert('All items in a bundle must belong to the same store.'); return; }
+  const title=prompt('Bundle title (this becomes the item title — you can edit it later):', items.length+'-CD lot');
+  if(title==null||!title.trim()) return;
+  const sku=prompt('Bundle SKU / location code.\nMake it unique (e.g. GBX-B14) and use it as the eBay custom label when you list the bundle, so the sync can link the sale back here:', '');
+  if(sku==null||!sku.trim()) return;
+  const skuT=sku.trim();
+  if(DATA.items.some(x=>x.sku===skuT&&x.bundleOf)){ alert('A bundle with that SKU already exists.'); return; }
+  const m=/\b(B\d{1,3})\b/i.exec(skuT); const ref=m?m[1].toUpperCase():'';
+  const dates=items.map(it=>it.purchaseDate).filter(Boolean).sort();
+  const b={ id:uid(), sku:skuT, location:skuT, itemId:'', title:title.trim(), account:accts[0], marketplace:'eBay', status:'sourced', category:items[0].category||'Other',
+    cost:Math.round(items.reduce((s,it)=>s+num(it.cost),0)*100)/100, source:items[0].source||'', purchaseDate:dates[0]||todayISO(),
+    tags:['bundle'].concat(ref?[ref]:[]), custom:{}, askingPrice:'', listedDate:'', salePrice:'', saleDate:'', ebayFees:'', shipCost:'',
+    bundleOf:ids, bundleRef:ref, notes:'Bundle of '+items.length+':\n'+items.map(it=>'- '+(it.title||'')+(it.ebayItemId?' ['+it.ebayItemId+']':'')).join('\n') };
+  b.itemId=autoId(b.account);
+  items.forEach(it=>{ it.prevStatus=it.status; it.status='bundled'; it.bundleId=b.id; it.bundledAt=todayISO(); });
+  DATA.items.push(b);
+  save(); BULKSEL.clear(); SEL_ANCHOR=null; render();
+  alert('Bundle created: "'+b.title+'" (SKU '+b.sku+'). It is in Unlisted; the '+items.length+' components moved to status "bundled".\n\nNext: Push, then have the single listings ended ('+items.filter(it=>it.ebayItemId&&it.prevStatus==='listed').length+' live on eBay), list the bundle with custom label '+b.sku+'.');
+  editItem(b.id);
+}
+function unbundle(bundleId){
+  const b=DATA.items.find(x=>x.id===bundleId); if(!b||!b.bundleOf) return;
+  if(isSold(b)){ alert('This bundle is sold — its components stay bundled.'); return; }
+  if(!confirm('Unbundle "'+b.title+'"? The '+b.bundleOf.length+' components go back to their previous status and the bundle item is deleted.')) return;
+  b.bundleOf.forEach(id=>{ const it=DATA.items.find(x=>x.id===id); if(!it) return; it.status=it.prevStatus||'sourced'; delete it.prevStatus; delete it.bundleId; delete it.bundledAt; });
+  DATA.items=DATA.items.filter(x=>x.id!==bundleId);
+  save(); closeModal(); render();
+}
+function bundleInfoHTML(it){
+  if(!it||!it.id) return '';
+  if(it.bundleOf){
+    const comps=it.bundleOf.map(id=>DATA.items.find(x=>x.id===id)).filter(Boolean);
+    const live=comps.filter(c=>c.ebayItemId&&c.prevStatus==='listed'&&c.status==='bundled');
+    return `<div class="field full" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:8px 10px">
+      <div style="font-weight:700;color:#166534">&#128230; Bundle of ${comps.length} item${comps.length===1?'':'s'}${it.bundleRef?' &middot; '+esc(it.bundleRef):''}</div>
+      <div style="font-size:12px;margin:4px 0 6px">${comps.map(c=>`<div>&bull; <a onclick="closeModal();editItem('${c.id}')" style="cursor:pointer">${esc(c.title||'(untitled)')}</a> <span class="muted">${esc(c.sku||'')}${c.ebayItemId?' &middot; eBay '+esc(c.ebayItemId):''}</span></div>`).join('')}</div>
+      <div class="muted" style="font-size:11px">Use <strong>${esc(it.sku||'')}</strong> as the eBay custom label on the bundle listing so the sync links the sale to this item.${live.length?' <span style="color:#b45309">'+live.length+' component listing'+(live.length===1?' is':'s are')+' still live on eBay.</span>':''}</div>
+      ${!isSold(it)?`<div style="margin-top:6px"><button type="button" class="btn ghost" onclick="unbundle('${it.id}')">Unbundle</button></div>`:''}
+    </div>`;
+  }
+  if(it.status==='bundled'||it.bundleId){
+    const b=DATA.items.find(x=>x.id===it.bundleId);
+    return `<div class="field full" style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 10px;font-size:12px">
+      &#128230; Part of bundle: ${b?`<a onclick="closeModal();editItem('${b.id}')" style="cursor:pointer;font-weight:700">${esc(b.title)}</a> <span class="muted">(${esc(b.sku||'')}${isSold(b)?' &middot; sold '+esc(b.saleDate||''):''})</span>`:'<span class="muted">(bundle item missing)</span>'}
+      ${it.ebayItemId&&it.prevStatus==='listed'?`<div class="muted" style="margin-top:3px">Single listing ${esc(it.ebayItemId)} may still be live &mdash; end it before the bundle goes up.</div>`:''}
+    </div>`;
+  }
+  return '';
 }
 function applyBulk(){
   const g=id=>{const e=document.getElementById(id);return e?e.value:''};
