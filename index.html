@@ -207,7 +207,7 @@
       <a data-view="settings"><span class="ic">⚙</span> Settings</a>
       <a id="calcNav"><span class="ic">%</span> Price calc</a>
     </nav>
-    <div class="side-foot">Mojonator v1.0 (b128)<br><span id="syncFoot">Local · GitHub-sync ready</span></div>
+    <div class="side-foot">Mojonator v1.0 (b129)<br><span id="syncFoot">Local · GitHub-sync ready</span></div>
   </aside>
 
   <!-- Main -->
@@ -317,6 +317,11 @@ function clientMerge(incoming){ /* MOJO_V113_MERGEFIX */
     let m=localByKey.get(key(inc));
     if(!m && inc.ebayOrderId && inc.ebayItemId){
       m=localByEbayId.get(inc.ebayItemId);
+      /* MOJO_B129: an item relisted under a new eBay number and then sold arrives with
+         the NEW number, while the local listed copy still has the OLD one — match it
+         through the relist history, then by the item's own id. */
+      if(!m){ const prev=(inc.relist&&inc.relist.prevIds)||inc.prevIds||[]; for(const pid of prev){ m=localByEbayId.get(String(pid)); if(m){ localByEbayId.delete(String(pid)); break; } } }
+      if(!m && inc.id){ const byId=DATA.items.find(x=>x.id===inc.id && !x.ebayOrderId && !isSold(x)); if(byId){ m=byId; if(byId.ebayItemId) localByEbayId.delete(byId.ebayItemId); } }
       if(m){ m.ebayOrderId=inc.ebayOrderId; localByEbayId.delete(inc.ebayItemId); } // one listed copy absorbs one order
     }
     if(m){
@@ -345,11 +350,25 @@ function clientMerge(incoming){ /* MOJO_V113_MERGEFIX */
      local item that is still marked listed, has no order of its own, and whose eBay
      item number the repo records as sold — unless the repo itself still carries a
      live (unsold) copy of that listing, e.g. a multi-quantity listing. */
-  const soldIds=new Set(incoming.filter(i=>i.ebayItemId && isSold(i)).map(i=>String(i.ebayItemId)));
-  const liveIds=new Set(incoming.filter(i=>i.ebayItemId && !isSold(i)).map(i=>String(i.ebayItemId)));
+  /* MOJO_B129: count a sale's old eBay numbers (relist history) and its item id too —
+     the 2026-10-05 ghosts were all relisted-then-sold, so b128's check missed them. */
+  const soldIds=new Set(), soldItemIds=new Set(), liveIds=new Set(), liveItemIds=new Set();
+  incoming.forEach(i=>{
+    if(isSold(i)){
+      if(i.ebayItemId) soldIds.add(String(i.ebayItemId));
+      ((i.relist&&i.relist.prevIds)||i.prevIds||[]).forEach(p=>soldIds.add(String(p)));
+      if(i.id) soldItemIds.add(i.id);
+    } else {
+      if(i.ebayItemId) liveIds.add(String(i.ebayItemId));
+      if(i.id) liveItemIds.add(i.id);
+    }
+  });
   const before=DATA.items.length;
-  DATA.items=DATA.items.filter(it=>!(it.ebayItemId && !it.ebayOrderId && !isSold(it) && it.status!=='bundled'
-    && soldIds.has(String(it.ebayItemId)) && !liveIds.has(String(it.ebayItemId))));
+  DATA.items=DATA.items.filter(it=>{
+    if(it.ebayOrderId || isSold(it) || it.status==='bundled' || !it.ebayItemId) return true;
+    if(liveIds.has(String(it.ebayItemId)) || liveItemIds.has(it.id)) return true;
+    return !(soldIds.has(String(it.ebayItemId)) || soldItemIds.has(it.id));
+  });
   const removed=before-DATA.items.length;
   return {added,updated,removed};
 }
