@@ -207,7 +207,7 @@
       <a data-view="settings"><span class="ic">⚙</span> Settings</a>
       <a id="calcNav"><span class="ic">%</span> Price calc</a>
     </nav>
-    <div class="side-foot">Mojonator v1.0 (b125)<br>Local · GitHub-sync ready</div>
+    <div class="side-foot">Mojonator v1.0 (b126)<br><span id="syncFoot">Local · GitHub-sync ready</span></div>
   </aside>
 
   <!-- Main -->
@@ -347,7 +347,17 @@ async function pullFromGitHub(silent){
     if(r.status===404){ if(!silent) alert('No data.json in the repo yet — push once to create it (or wait for the first eBay sync).'); return; }
     if(!r.ok) throw new Error(r.status+' '+(await r.text()).slice(0,140));
     const j=await r.json();
-    const remote=JSON.parse(b64decode(j.content));
+    /* MOJO_B126_BIGFILE: GitHub's contents API leaves `content` empty once a file
+       passes 1 MB (data.json crossed that ~2026-10-01 and pulls silently failed).
+       Fall back to the raw media type, which works up to 100 MB. */
+    let text;
+    if(j.content && j.encoding==='base64'){ text=b64decode(j.content); }
+    else {
+      const rr=await fetch(ghUrl()+'?ref='+encodeURIComponent(s.ghBranch),{headers:Object.assign({},ghHeaders(),{Accept:'application/vnd.github.raw+json'})});
+      if(!rr.ok) throw new Error('raw '+rr.status+' '+(await rr.text()).slice(0,140));
+      text=await rr.text();
+    }
+    const remote=JSON.parse(text);
     DATA._sha=j.sha;
     // Local settings always win; remote settings only fill keys missing
     // locally (the eBay Action writes data.json with empty settings, which
@@ -356,8 +366,53 @@ async function pullFromGitHub(silent){
     const res=clientMerge(remote.items||[]);
     cleanPennyCosts(DATA.items);
     save(); buildAcctSwitch(); if(STATE.view) render();
+    setPullStatus({ok:true,at:new Date().toISOString()});
+    checkSyncFreshness();
     if(!silent) alert(`Pulled from GitHub: ${res.added} new, ${res.updated} updated.`);
-  }catch(e){ if(!silent) alert('Pull failed: '+e.message); }
+  }catch(e){
+    setPullStatus({ok:false,at:new Date().toISOString(),err:String(e&&e.message||e)});
+    if(!silent) alert('Pull failed: '+e.message);
+  }
+}
+
+/* MOJO_B126_SYNCWATCH: never fail quietly again. Remembers the last pull result
+   (per browser), shows it in the sidebar footer, and raises a red banner when a
+   pull fails, the last good pull is over 24h old, or the eBay Action hasn't
+   committed data.json in over 24h. */
+const PULL_KEY='mojonator_pull_status';
+function getPullStatus(){ try{ return JSON.parse(localStorage.getItem(PULL_KEY)||'{}'); }catch(e){ return {}; } }
+function setPullStatus(st){
+  const prev=getPullStatus();
+  const next=Object.assign({},prev,{last:st});
+  if(st.ok) next.lastOk=st.at;
+  try{ localStorage.setItem(PULL_KEY,JSON.stringify(next)); }catch(e){}
+  renderSyncStatus();
+}
+function agoText(iso){ if(!iso) return 'never'; const h=(Date.now()-new Date(iso))/36e5; if(h<1) return Math.max(1,Math.round(h*60))+' min ago'; if(h<48) return Math.round(h)+' h ago'; return Math.round(h/24)+' days ago'; }
+function renderSyncStatus(){
+  const st=getPullStatus(); const foot=document.getElementById('syncFoot');
+  const problems=[];
+  if(DATA.settings.ghToken){
+    if(st.last && !st.last.ok) problems.push('Last GitHub pull FAILED ('+agoText(st.last.at)+'): '+st.last.err);
+    if(!st.lastOk || (Date.now()-new Date(st.lastOk))>864e5) problems.push('Data last pulled from GitHub: '+agoText(st.lastOk)+'.');
+    if(st.actionAt && (Date.now()-new Date(st.actionAt))>864e5) problems.push('The eBay sync Action last updated data.json '+agoText(st.actionAt)+' — check the Actions tab.');
+  }
+  if(foot) foot.textContent = DATA.settings.ghToken ? ('Pulled '+agoText(st.lastOk)+(st.actionAt?' · eBay sync '+agoText(st.actionAt):'')) : 'Local only (no GitHub token)';
+  let b=document.getElementById('syncBanner');
+  if(!problems.length){ if(b) b.remove(); return; }
+  if(!b){ b=document.createElement('div'); b.id='syncBanner'; b.style.cssText='position:sticky;top:0;z-index:9999;background:#b3261e;color:#fff;padding:8px 14px;font:13px/1.4 system-ui,sans-serif;display:flex;gap:12px;align-items:center;flex-wrap:wrap'; document.body.prepend(b); }
+  b.innerHTML='<b>&#9888; Mojonator data may be out of date.</b> <span>'+problems.map(x=>String(x).replace(/[<>&]/g,'')).join(' ')+'</span> <button class="btn" style="margin-left:auto" onclick="pullFromGitHub(false)">Pull now</button>';
+}
+async function checkSyncFreshness(){
+  try{
+    const s=DATA.settings; if(!s.ghToken) return;
+    const r=await fetch(`https://api.github.com/repos/${s.ghRepo}/commits?path=data.json&per_page=1&sha=${encodeURIComponent(s.ghBranch)}`,{headers:ghHeaders()});
+    if(!r.ok) return;
+    const c=(await r.json())[0]; if(!c) return;
+    const st=getPullStatus(); st.actionAt=c.commit.committer.date;
+    try{ localStorage.setItem(PULL_KEY,JSON.stringify(st)); }catch(e){}
+    renderSyncStatus();
+  }catch(e){}
 }
 
 async function pushToGitHub(){
@@ -1328,7 +1383,9 @@ calcInit();
 
 buildAcctSwitch();
 render();
+renderSyncStatus();
 if(DATA.settings.ghAutoPull && DATA.settings.ghToken){ pullFromGitHub(true); }
+setInterval(renderSyncStatus,15*60*1000); /* MOJO_B126 */
 </script>
 </body>
 </html>
