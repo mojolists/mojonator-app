@@ -207,7 +207,7 @@
       <a data-view="settings"><span class="ic">⚙</span> Settings</a>
       <a id="calcNav"><span class="ic">%</span> Price calc</a>
     </nav>
-    <div class="side-foot">Mojonator v1.0 (b126)<br><span id="syncFoot">Local · GitHub-sync ready</span></div>
+    <div class="side-foot">Mojonator v1.0 (b127)<br><span id="syncFoot">Local · GitHub-sync ready</span></div>
   </aside>
 
   <!-- Main -->
@@ -324,6 +324,10 @@ function clientMerge(incoming){ /* MOJO_V113_MERGEFIX */
          take the fresh price/listed date too, and carry the relist state. */
       if(inc.ebayItemId && m.ebayItemId && inc.ebayItemId!==m.ebayItemId){ m.askingPrice=inc.askingPrice; m.listedDate=inc.listedDate; }
       if(inc.relist) m.relist=inc.relist;
+      /* MOJO_B127_PRICE: eBay is the source of truth for the asking price — take the
+         synced price every pull, not only on relist (price edits on eBay never
+         reached the app before; e.g. WD Red SA500 stuck at 149.77 vs 100.77 live). */
+      if(inc.ebayItemId && inc.askingPrice!=null && inc.askingPrice!=='') m.askingPrice=inc.askingPrice;
       /* MOJO_B118_SKULOC: the eBay custom label doubles as the storage location, so
          for eBay items the synced sku (and the location derived from it) wins.
          MOJO_B119_SKUPUSH: unless a local label edit is pending — then local wins
@@ -353,11 +357,15 @@ async function pullFromGitHub(silent){
     let text;
     if(j.content && j.encoding==='base64'){ text=b64decode(j.content); }
     else {
-      const rr=await fetch(ghUrl()+'?ref='+encodeURIComponent(s.ghBranch),{headers:Object.assign({},ghHeaders(),{Accept:'application/vnd.github.raw+json'})});
+      /* MOJO_B127: fetch the blob by sha on its own URL with no-store — re-using the
+         contents URL let the browser hand back the cached metadata JSON instead of
+         the file, so the "pull" merged nothing and still reported success. */
+      const rr=await fetch(`https://api.github.com/repos/${s.ghRepo}/git/blobs/${j.sha}`,{cache:'no-store',headers:Object.assign({},ghHeaders(),{Accept:'application/vnd.github.raw+json'})});
       if(!rr.ok) throw new Error('raw '+rr.status+' '+(await rr.text()).slice(0,140));
       text=await rr.text();
     }
     const remote=JSON.parse(text);
+    if(!remote || !Array.isArray(remote.items)) throw new Error('data.json came back without an items list — nothing merged');
     DATA._sha=j.sha;
     // Local settings always win; remote settings only fill keys missing
     // locally (the eBay Action writes data.json with empty settings, which
