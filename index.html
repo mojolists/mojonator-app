@@ -207,7 +207,7 @@
       <a data-view="settings"><span class="ic">⚙</span> Settings</a>
       <a id="calcNav"><span class="ic">%</span> Price calc</a>
     </nav>
-    <div class="side-foot">Mojonator v1.0 (b127)<br><span id="syncFoot">Local · GitHub-sync ready</span></div>
+    <div class="side-foot">Mojonator v1.0 (b128)<br><span id="syncFoot">Local · GitHub-sync ready</span></div>
   </aside>
 
   <!-- Main -->
@@ -340,7 +340,18 @@ function clientMerge(incoming){ /* MOJO_V113_MERGEFIX */
       updated++;
     } else { DATA.items.push(inc); added++; }
   });
-  return {added,updated};
+  /* MOJO_B128_GHOSTS: a sale can arrive without absorbing the local "listed" copy
+     (it stayed behind as a ghost — 16 found 2026-10-05, all long shipped). Drop any
+     local item that is still marked listed, has no order of its own, and whose eBay
+     item number the repo records as sold — unless the repo itself still carries a
+     live (unsold) copy of that listing, e.g. a multi-quantity listing. */
+  const soldIds=new Set(incoming.filter(i=>i.ebayItemId && isSold(i)).map(i=>String(i.ebayItemId)));
+  const liveIds=new Set(incoming.filter(i=>i.ebayItemId && !isSold(i)).map(i=>String(i.ebayItemId)));
+  const before=DATA.items.length;
+  DATA.items=DATA.items.filter(it=>!(it.ebayItemId && !it.ebayOrderId && !isSold(it) && it.status!=='bundled'
+    && soldIds.has(String(it.ebayItemId)) && !liveIds.has(String(it.ebayItemId))));
+  const removed=before-DATA.items.length;
+  return {added,updated,removed};
 }
 
 async function pullFromGitHub(silent){
@@ -376,7 +387,7 @@ async function pullFromGitHub(silent){
     save(); buildAcctSwitch(); if(STATE.view) render();
     setPullStatus({ok:true,at:new Date().toISOString()});
     checkSyncFreshness();
-    if(!silent) alert(`Pulled from GitHub: ${res.added} new, ${res.updated} updated.`);
+    if(!silent) alert(`Pulled from GitHub: ${res.added} new, ${res.updated} updated${res.removed?`, ${res.removed} sold leftovers removed`:''}.`);
   }catch(e){
     setPullStatus({ok:false,at:new Date().toISOString(),err:String(e&&e.message||e)});
     if(!silent) alert('Pull failed: '+e.message);
