@@ -207,7 +207,7 @@
       <a data-view="settings"><span class="ic">⚙</span> Settings</a>
       <a id="calcNav"><span class="ic">%</span> Price calc</a>
     </nav>
-    <div class="side-foot">Mojonator v1.0 (b129)<br><span id="syncFoot">Local · GitHub-sync ready</span></div>
+    <div class="side-foot">Mojonator v1.0 (b130)<br><span id="syncFoot">Local · GitHub-sync ready</span></div>
   </aside>
 
   <!-- Main -->
@@ -329,6 +329,8 @@ function clientMerge(incoming){ /* MOJO_V113_MERGEFIX */
          take the fresh price/listed date too, and carry the relist state. */
       if(inc.ebayItemId && m.ebayItemId && inc.ebayItemId!==m.ebayItemId){ m.askingPrice=inc.askingPrice; m.listedDate=inc.listedDate; }
       if(inc.relist) m.relist=inc.relist;
+      /* MOJO_B130_FIRSTLISTED: an original date the sync read from eBay beats a local estimate */
+      if(inc.firstListed && inc.firstListedSource==='ebay' && m.firstListedSource!=='ebay'){ m.firstListed=inc.firstListed; m.firstListedSource='ebay'; }
       /* MOJO_B127_PRICE: eBay is the source of truth for the asking price — take the
          synced price every pull, not only on relist (price edits on eBay never
          reached the app before; e.g. WD Red SA500 stuck at 149.77 vs 100.77 live). */
@@ -677,8 +679,8 @@ function rowListed(it){
     <td>${esc(it.source||'—')}</td>
     <td class="num tight cell-date" title="${esc(it.purchaseDate||'')}">${shortDate(it.purchaseDate)}</td>
     <td class="num">${it.askingPrice?money(num(it.askingPrice)):'—'}</td>
-    <td class="num">${it.listedDate||'—'}</td>
-    <td class="num">${daysSince(it.listedDate)}</td>
+    <td class="num" title="${it.listedDate?'Current listing since '+esc(it.listedDate):''}">${firstListedOf(it)||'—'}</td>
+    <td class="num" title="Days listed in total, across relists">${daysSince(firstListedOf(it))}</td>
     <td class="num">${relistCell(it)}</td>
     <td class="row-actions"><button class="icon-btn" onclick="editItem('${it.id}')">Edit</button></td>
   </tr>`;
@@ -1034,6 +1036,16 @@ function ensureFirstListed(it){
   d.setDate(d.getDate()-30*n);
   it.firstListed=d.toISOString().slice(0,10);
   save();
+}
+/* MOJO_B130_FIRSTLISTED: original listing date without mutating the item (safe in table renders).
+   The sync now stores firstListed (from eBay when it can); fall back to the b122 estimate. */
+function firstListedOf(it){
+  if(!it) return '';
+  if(it.firstListed) return it.firstListed;
+  if(!it.listedDate) return '';
+  const d=new Date(it.listedDate+'T00:00:00'); if(isNaN(d)) return it.listedDate;
+  d.setDate(d.getDate()-30*((it.relist&&it.relist.count)||0));
+  return d.toISOString().slice(0,10);
 }
 function daysListedHTML(it){
   if(!it || !it.id || it.status!=='listed') return '';
