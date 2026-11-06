@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
@@ -14,6 +15,29 @@ class WebFetchException implements Exception {
 /// Android System WebView on phones) and returns its visible text. Sites
 /// that bot-check plain HTTP clients (eBay) accept this.
 class WebFetcher {
+  static WebViewEnvironment? _env;
+  static Future<void>? _envInit;
+
+  /// On Windows, WebView2 must be given a writable user-data folder; the
+  /// default is next to the exe, which is read-only under Program Files.
+  static Future<WebViewEnvironment?> _environment() async {
+    if (!Platform.isWindows) return null;
+    _envInit ??= () async {
+      final base = Platform.environment['LOCALAPPDATA'] ??
+          Platform.environment['TEMP'] ??
+          Directory.systemTemp.path;
+      final dir = Directory('$base\\VintedScout\\webview2');
+      try {
+        await dir.create(recursive: true);
+      } catch (_) {}
+      _env = await WebViewEnvironment.create(
+        settings: WebViewEnvironmentSettings(userDataFolder: dir.path),
+      );
+    }();
+    await _envInit;
+    return _env;
+  }
+
   static bool isChallenge(String text) {
     final t = text.toLowerCase();
     return t.contains('pardon our interruption') ||
@@ -31,7 +55,9 @@ class WebFetcher {
   }) async {
     final loaded = Completer<void>();
     String? loadError;
+    final env = await _environment();
     final headless = HeadlessInAppWebView(
+      webViewEnvironment: env,
       initialUrlRequest: URLRequest(url: WebUri(url)),
       initialSize: const Size(1280, 2000),
       initialSettings: InAppWebViewSettings(

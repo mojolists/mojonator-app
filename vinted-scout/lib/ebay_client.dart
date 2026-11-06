@@ -41,8 +41,13 @@ class EbayClient {
     } on WebFetchException catch (e) {
       throw EbayException('eBay: $e');
     } catch (e) {
-      // Embedded browser unavailable on this device: try plain HTTP.
-      text = await _plainHttp(uri);
+      // Embedded browser unavailable on this device: try plain HTTP, but
+      // report why the browser failed so the problem is visible.
+      try {
+        text = await _plainHttp(uri);
+      } on EbayException catch (e2) {
+        throw EbayException('${e2.message} Embedded browser also failed: $e');
+      }
     }
     return _trim(text, maxChars);
   }
