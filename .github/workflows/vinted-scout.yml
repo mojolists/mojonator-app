@@ -1,0 +1,93 @@
+name: Vinted Scout - Windows + Android
+
+on:
+  push:
+    branches: [main]
+    paths: ['vinted-scout/**', '.github/workflows/vinted-scout.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  FLUTTER_CHANNEL: stable
+
+jobs:
+  windows:
+    name: Windows installer
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: vinted-scout
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          cache: true
+      - run: flutter --version
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter build windows --release
+      - name: Portable zip
+        shell: pwsh
+        run: |
+          Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath VintedScout-windows-portable.zip -Force
+      - name: Installer (Inno Setup)
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer\VintedScout.iss
+          Get-ChildItem installer\output
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            vinted-scout/VintedScout-windows-portable.zip
+            vinted-scout/installer/output/*.exe
+
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vinted-scout
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          cache: true
+      - run: flutter pub get
+      - run: flutter build apk --release
+      - run: cp build/app/outputs/flutter-apk/app-release.apk VintedScout-android.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: vinted-scout/VintedScout-android.apk
+
+  release:
+    name: Publish release
+    needs: [windows, android]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - run: ls -R dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: vinted-scout-build-${{ github.run_number }}
+          name: Vinted Scout build ${{ github.run_number }}
+          body: |
+            Windows: run the `VintedScout-Setup-*.exe` installer (or unzip the portable zip and run `vinted_scout.exe`).
+            Android: install `VintedScout-android.apk` (allow installs from unknown sources; it is signed with a debug key, so each new build installs over the last one).
+            First launch: open Settings and paste your Anthropic API key.
+          files: |
+            dist/windows/VintedScout-windows-portable.zip
+            dist/windows/installer/output/*.exe
+            dist/android/VintedScout-android.apk
