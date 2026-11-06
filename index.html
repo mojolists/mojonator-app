@@ -207,7 +207,7 @@
       <a data-view="settings"><span class="ic">⚙</span> Settings</a>
       <a id="calcNav"><span class="ic">%</span> Price calc</a>
     </nav>
-    <div class="side-foot">Mojonator v1.0 (b130)<br><span id="syncFoot">Local · GitHub-sync ready</span></div>
+    <div class="side-foot">Mojonator v1.0 (b131)<br><span id="syncFoot">Local · GitHub-sync ready</span></div>
   </aside>
 
   <!-- Main -->
@@ -296,7 +296,7 @@ function save(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(DATA)); localS
 /* ---------------- GitHub sync (pull/push data.json) ---------------- */
 /* Repo data.json is the source of truth. The GitHub Action writes eBay
    sales into it server-side; the app pulls it, you add costs, you push. */
-const EBAY_FIELDS = ['title','salePrice','saleDate','ebayFees','shipCost','status','marketplace','ebayItemId'];
+const EBAY_FIELDS = ['title','salePrice','saleDate','ebayFees','shipCost','status','marketplace','ebayItemId','shipCostSource','shipLabelTx','shippedAt']; /* MOJO_B131_BULKLABELS: bulk-label split bookkeeping from the sync must survive a Push */
 const MANUAL_FIELDS = ['cost','source','location','category','purchaseDate','tags','custom','notes','consignPartner','consignSplit','itemId','sku','listedDate','refund','otherFees','autoRelist','firstListed'];
 function b64encode(s){ return btoa(unescape(encodeURIComponent(s))); }
 function b64decode(s){ return decodeURIComponent(escape(atob(s.replace(/\s/g,'')))); }
@@ -765,7 +765,7 @@ function renderSales(c){
       <td><span class="acct-badge acct-${it.account}">${esc(acctName(it.account))}</span></td>
       <td>${esc(it.marketplace||'eBay')}</td><td>${it.saleDate||'—'}</td><td>${esc(it.location||'—')}</td><!--MOJO_V114_SALESLOC-->
       <td class="num">${money(num(it.salePrice))}</td><td class="num neg">${money(num(it.ebayFees)+num(it.otherFees))}</td>
-      <td class="num neg">${money(num(it.shipCost))}</td><td class="num">${money(num(it.cost))}</td>
+      <td class="num neg" ${it.shipCostSource==='bulk-split'?'title="Bulk label purchase split evenly across the orders shipped together"':''}>${it.shipCostSource==='bulk-split'?'≈':''}${money(num(it.shipCost))}</td><td class="num">${money(num(it.cost))}</td><!--MOJO_B131_BULKLABELS-->
       <td class="num ${netProfit(it)>=0?'pos':'neg'}">${money(netProfit(it))}</td><td class="num">${pct(roi(it))}</td></tr>`).join('')||emptyRow(13)}</tbody>
   </table></div></div>`;
 }
