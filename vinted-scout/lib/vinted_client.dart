@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'models.dart';
 import 'net.dart';
 
@@ -10,13 +8,13 @@ class VintedException implements Exception {
   String toString() => message;
 }
 
-/// Reads the public Vinted catalog the same way the website does:
-/// a first hit on the homepage sets the anonymous session cookies, then the
-/// JSON catalog endpoint is called with those cookies.
+/// Reads the public Vinted catalog from the server-rendered HTML pages
+/// (Vinted's old JSON catalog endpoint returns 404 now). Each listing card
+/// carries an overlay link whose title attribute is
+/// "Title, Condition: Very good, 2.00 $, 2.80 $" — that is all we need.
 class VintedClient {
   static const host = 'https://www.vinted.com';
   final BrowserSession session;
-  bool _primed = false;
 
   VintedClient(this.session);
 
@@ -25,21 +23,27 @@ class VintedClient {
   static List<int> statusIds({required bool includeVeryGood}) =>
       includeVeryGood ? const [6, 1, 2] : const [6, 1];
 
-  Future<void> _prime() async {
-    if (_primed) return;
-    final r = await session.get(Uri.parse('$host/'));
-    if (r.status == 403) {
-      throw VintedException(
-          'Vinted refused the first request (HTTP 403, bot check). Wait a few minutes and try again, or switch networks.');
-    }
-    _primed = true;
+  static Uri catalogUri({
+    required String term,
+    required int page,
+    required bool includeVeryGood,
+  }) {
+    final qp = <String, List<String>>{
+      'search_text': [term],
+      'order': ['newest_first'],
+      'status_ids[]':
+          statusIds(includeVeryGood: includeVeryGood).map((e) => '$e').toList(),
+      if (page > 1) 'page': ['$page'],
+    };
+    return Uri.parse('$host/catalog').replace(queryParameters: qp);
   }
 
-  Map<String, String> get _jsonHeaders => const {
-        'Accept': 'application/json, text/plain, */*',
-        'X-Requested-With': 'XMLHttpRequest',
-        'Referer': '$host/catalog',
-      };
+  static final _overlay = RegExp(
+      r'<a href="(/items/(\d+)[^"]*?)\?referrer=catalog"[^>]*?title="([^"]*)"');
+  static final _thumb = RegExp(
+      r'<img src="([^"]+)"[^>]*?data-testid="product-item-id-(\d+)--image--img"');
+  static final _titleParts = RegExp(
+      r'^(.*),\s*Condition:\s*([^,]+),\s*([\d.,]+)\s*\$,\s*([\d.,]+)\s*\$\s*$');
 
   /// One page of search results.
   Future<List<VintedListing>> searchPage({
@@ -48,117 +52,128 @@ class VintedClient {
     required int page,
     required bool includeVeryGood,
   }) async {
-    await _prime();
-    final qp = <String, List<String>>{
-      'page': ['$page'],
-      'per_page': ['96'],
-      'search_text': [term],
-      'order': ['newest_first'],
-      'status_ids[]':
-          statusIds(includeVeryGood: includeVeryGood).map((e) => '$e').toList(),
-    };
-    final uri = Uri.parse('$host/api/v2/catalog/items')
-        .replace(queryParameters: qp);
-    var r = await session.get(uri, headers: _jsonHeaders);
-    if (r.status == 401 || r.status == 403) {
-      // Session may have gone stale; re-prime once.
-      _primed = false;
-      await _prime();
-      r = await session.get(uri, headers: _jsonHeaders);
+    final uri = catalogUri(term: term, page: page, includeVeryGood: includeVeryGood);
+    final r = await session.get(uri);
+    if (r.status == 403) {
+      throw VintedException(
+          'Vinted refused the request (HTTP 403, bot check) for "$term" page $page. Wait a few minutes and try again.');
     }
     if (!r.ok) {
       throw VintedException(
-          'Vinted catalog request failed (HTTP ${r.status}) for "$term" page $page.');
+          'Vinted catalog page failed (HTTP ${r.status}) for "$term" page $page.');
     }
-    final Map<String, dynamic> j;
-    try {
-      j = jsonDecode(r.body) as Map<String, dynamic>;
-    } catch (_) {
-      throw VintedException(
-          'Vinted returned something that is not JSON for "$term" page $page (probably a bot-check page).');
+    final html = r.body;
+    final thumbs = <int, String>{};
+    for (final m in _thumb.allMatches(html)) {
+      final id = int.tryParse(m.group(2)!);
+      if (id != null) thumbs[id] = _decode(m.group(1)!);
     }
-    final items = (j['items'] as List?) ?? const [];
     final out = <VintedListing>[];
-    for (final it in items) {
-      if (it is! Map<String, dynamic>) continue;
-      final id = (it['id'] as num?)?.toInt();
-      if (id == null) continue;
-      final title = (it['title'] ?? '').toString().trim();
-      final price = _amount(it['price']);
-      final incl = _amount(it['total_item_price']) ?? price;
+    final seen = <int>{};
+    for (final m in _overlay.allMatches(html)) {
+      final id = int.tryParse(m.group(2)!);
+      if (id == null || !seen.add(id)) continue;
+      final path = m.group(1)!;
+      final raw = _decode(m.group(3)!);
+      final p = _titleParts.firstMatch(raw);
+      String title;
+      String condition;
+      double? price;
+      double? incl;
+      if (p != null) {
+        title = p.group(1)!.trim();
+        condition = p.group(2)!.trim();
+        price = _money(p.group(3)!);
+        incl = _money(p.group(4)!);
+      } else {
+        // Fallback: take the last two "$" amounts and the Condition word.
+        final amounts = RegExp(r'([\d.,]+)\s*\$').allMatches(raw).toList();
+        if (amounts.length < 2) continue;
+        price = _money(amounts[amounts.length - 2].group(1)!);
+        incl = _money(amounts.last.group(1)!);
+        final c = RegExp(r'Condition:\s*([^,]+)').firstMatch(raw);
+        condition = c?.group(1)?.trim() ?? '';
+        final cut = raw.indexOf(', Condition:');
+        title = (cut > 0 ? raw.substring(0, cut) : raw).trim();
+      }
       if (price == null || incl == null) continue;
-      final status = (it['status'] ?? '').toString();
-      var url = (it['url'] ?? '').toString();
-      if (url.isEmpty) url = '$host/items/$id';
-      final photo = it['photo'];
-      final photoUrl = photo is Map ? (photo['url']?.toString()) : null;
       out.add(VintedListing(
         id: id,
         title: title,
-        condition: status,
+        condition: condition,
         price: price,
         inclPrice: incl,
-        url: url,
-        photoUrl: photoUrl,
+        url: '$host$path',
+        photoUrl: thumbs[id],
         format: formatLabel,
         searchTerm: term,
       ));
     }
+    if (out.isEmpty && !html.contains('product-item-id-')) {
+      if (html.contains('No results') || html.contains('0 results')) return out;
+      throw VintedException(
+          'Vinted returned a page without listings for "$term" page $page (layout change or bot-check page).');
+    }
     return out;
   }
 
-  /// Full item details for a candidate: description, seller feedback, and a
-  /// best-effort read on free shipping.
-  Future<VintedItemDetail?> itemDetail(int id) async {
-    await _prime();
-    final uri = Uri.parse('$host/api/v2/items/$id');
-    final r = await session.get(uri, headers: _jsonHeaders);
+  static final _metaDesc =
+      RegExp(r'<meta name="description" content="([^"]*)"');
+  static final _feedback = RegExp(r'feedback_count\\*"\s*:\s*(\d+)');
+  static final _sellerName = RegExp(r'\\*"name\\*"\s*:\s*\\*"([^"\\]+)');
+
+  /// Item details for a candidate, scraped from the item page.
+  Future<VintedItemDetail?> itemDetail(String itemUrl) async {
+    final r = await session.get(Uri.parse(itemUrl));
     if (!r.ok) return null;
-    try {
-      final j = jsonDecode(r.body) as Map<String, dynamic>;
-      final item = (j['item'] as Map<String, dynamic>?) ?? j;
-      final user = item['user'];
-      final login = user is Map ? (user['login'] ?? '').toString() : '';
-      final fb = user is Map
-          ? ((user['feedback_count'] as num?)?.toInt() ??
-              (user['positive_feedback_count'] as num?)?.toInt() ??
-              0)
-          : 0;
-      final desc = (item['description'] ?? '').toString();
-      bool? free;
-      String? note;
-      final raw = r.body;
-      if (RegExp(r'"free_shipping"\s*:\s*true').hasMatch(raw)) {
+    final html = r.body;
+    final desc = _decode(_metaDesc.firstMatch(html)?.group(1) ?? '');
+
+    // Seller block: the seller_badges_info JSON holds feedback_count + name.
+    var login = '';
+    var fb = 0;
+    final badgeIdx = html.indexOf('seller_badges_info');
+    final slice = badgeIdx >= 0
+        ? html.substring(badgeIdx, (badgeIdx + 4000).clamp(0, html.length))
+        : html;
+    final f = _feedback.firstMatch(slice) ?? _feedback.firstMatch(html);
+    if (f != null) fb = int.tryParse(f.group(1)!) ?? 0;
+    final n = _sellerName.firstMatch(slice);
+    if (n != null) login = n.group(1)!;
+
+    // Shipping banner: "Free shipping" or "Shipping from $X.XX".
+    bool? free;
+    String? note;
+    final b = html.indexOf('data-testid="item-shipping-banner"');
+    if (b >= 0) {
+      final text = htmlToText(html.substring(b, (b + 3000).clamp(0, html.length)));
+      if (text.contains('Free shipping')) {
         free = true;
-      } else if (RegExp(r'"free_shipping"\s*:\s*false').hasMatch(raw)) {
-        free = false;
+      } else {
+        final m = RegExp(r'from \$([\d.]+)').firstMatch(text);
+        if (m != null) {
+          note = 'Shipping from \$${m.group(1)}';
+          free = m.group(1) == '0.00' ? null : false;
+        }
       }
-      final lower = desc.toLowerCase();
-      if (free == null && lower.contains('free shipping')) {
-        free = true;
-        note = 'Description mentions free shipping';
-      }
-      return VintedItemDetail(
-        description: desc,
-        sellerLogin: login,
-        sellerFeedbackCount: fb,
-        freeShipping: free,
-        shippingNote: note,
-      );
-    } catch (_) {
-      return null;
     }
+    return VintedItemDetail(
+      description: desc,
+      sellerLogin: login,
+      sellerFeedbackCount: fb,
+      freeShipping: free,
+      shippingNote: note,
+    );
   }
 
-  static double? _amount(dynamic v) {
-    if (v == null) return null;
-    if (v is num) return v.toDouble();
-    if (v is String) return double.tryParse(v);
-    if (v is Map) {
-      final a = v['amount'];
-      if (a is num) return a.toDouble();
-      if (a is String) return double.tryParse(a);
-    }
-    return null;
-  }
+  static double? _money(String s) =>
+      double.tryParse(s.replaceAll(',', '').trim());
+
+  static String _decode(String s) => s
+      .replaceAll('&amp;', '&')
+      .replaceAll('&quot;', '"')
+      .replaceAll('&#39;', "'")
+      .replaceAll('&#x27;', "'")
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>');
 }

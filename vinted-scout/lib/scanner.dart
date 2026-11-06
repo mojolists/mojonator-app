@@ -111,7 +111,7 @@ class Scanner {
         say('Comping: ${l.title}');
         VintedItemDetail? detail;
         try {
-          detail = await vinted.itemDetail(l.id);
+          detail = await vinted.itemDetail(l.url);
         } catch (_) {}
         final shipping =
             detail?.freeShipping == true ? 0.0 : settings.shippingAssumption;
