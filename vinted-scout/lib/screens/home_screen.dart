@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../models.dart';
 import '../scanner.dart';
@@ -278,7 +279,23 @@ class _HomeScreenState extends State<HomeScreen> {
           ListTile(
             dense: true,
             title: const Text('Scan log'),
-            trailing: Icon(_showLog ? Icons.expand_less : Icons.expand_more),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  tooltip: 'Copy log',
+                  icon: const Icon(Icons.copy, size: 18),
+                  onPressed: () async {
+                    await Clipboard.setData(ClipboardData(text: _log.join('\n')));
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Log copied')));
+                    }
+                  },
+                ),
+                Icon(_showLog ? Icons.expand_less : Icons.expand_more),
+              ],
+            ),
             onTap: () => setState(() => _showLog = !_showLog),
           ),
           if (_showLog)
@@ -291,7 +308,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   shrinkWrap: true,
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                   itemCount: _log.length,
-                  itemBuilder: (_, i) => Text(
+                  itemBuilder: (_, i) => SelectableText(
                     _log[i],
                     style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
                   ),

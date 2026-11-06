@@ -66,10 +66,12 @@ class BrowserSession {
   Future<HttpResult> postJson(Uri uri, Map<String, dynamic> body,
       {Map<String, String> headers = const {}}) async {
     final req = await _client.postUrl(uri);
-    req.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
+    final bytes = utf8.encode(jsonEncode(body));
+    req.headers.set(HttpHeaders.contentTypeHeader, 'application/json; charset=utf-8');
     req.headers.set(HttpHeaders.userAgentHeader, 'vinted-scout/1.0');
+    req.headers.set(HttpHeaders.contentLengthHeader, bytes.length);
     headers.forEach(req.headers.set);
-    req.write(jsonEncode(body));
+    req.add(bytes);
     final res = await req.close();
     final text = await res.transform(utf8.decoder).join();
     return HttpResult(res.statusCode, text, uri);
