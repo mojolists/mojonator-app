@@ -32,12 +32,15 @@ class EbayClient {
     return Uri.https('www.ebay.com', '/sch/i.html', qp);
   }
 
+  /// A sold listing line like "Sold Oct 29, 2026".
+  static final RegExp soldLine = RegExp(r'Sold\s+[A-Z][a-z]{2}\s+\d{1,2},\s+\d{4}');
+
   Future<String> soldSearchText(String query,
       {required String compCondition, int maxChars = 9000}) async {
     final uri = soldSearchUri(query, compCondition: compCondition);
     String text;
     try {
-      text = await web.pageText(uri.toString());
+      text = await web.pageText(uri.toString(), readyWhen: soldLine);
     } on WebFetchException catch (e) {
       throw EbayException('eBay: $e');
     } catch (e) {
@@ -48,6 +51,12 @@ class EbayClient {
       } on EbayException catch (e2) {
         throw EbayException('${e2.message} Embedded browser also failed: $e');
       }
+    }
+    if (!soldLine.hasMatch(text)) {
+      final preview = text.replaceAll(RegExp(r'\s+'), ' ').trim();
+      throw EbayException(
+          'eBay page loaded but showed no sold listings (${text.length} chars). '
+          'Start of page: "${preview.substring(0, preview.length > 220 ? 220 : preview.length)}"');
     }
     return _trim(text, maxChars);
   }

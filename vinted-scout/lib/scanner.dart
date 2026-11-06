@@ -122,6 +122,8 @@ class Scanner {
         try {
           final text = await ebay.soldSearchText(c.ebayQuery,
               compCondition: c.compCondition);
+          say('  eBay sold text: ${text.length} chars, '
+              '${EbayClient.soldLine.allMatches(text).length} sold lines');
           final j = await claude.readComps(
             c: c,
             landedCost: landed,

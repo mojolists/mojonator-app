@@ -48,10 +48,13 @@ class WebFetcher {
         t.contains('reference #') && t.length < 1500;
   }
 
+  /// [readyWhen] — keep polling (up to [settlePolls] x 2s) until the page
+  /// text matches it; useful for sites that render results after load.
   Future<String> pageText(
     String url, {
     Duration loadTimeout = const Duration(seconds: 30),
-    int settlePolls = 8,
+    int settlePolls = 10,
+    RegExp? readyWhen,
   }) async {
     final loaded = Completer<void>();
     String? loadError;
@@ -93,8 +96,14 @@ class WebFetcher {
         final r = await c.evaluateJavascript(
             source: 'document.body ? document.body.innerText : ""');
         final text = (r ?? '').toString();
-        if (text.trim().isNotEmpty && !isChallenge(text)) return text;
+        if (text.trim().isNotEmpty && !isChallenge(text)) {
+          if (readyWhen == null || readyWhen.hasMatch(text)) return text;
+        }
         last = text;
+        // Nudge lazy rendering.
+        try {
+          await c.evaluateJavascript(source: 'window.scrollTo(0, 1200)');
+        } catch (_) {}
         // Challenge pages usually resolve themselves after a moment.
         await Future<void>.delayed(const Duration(seconds: 2));
       }
