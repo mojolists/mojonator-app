@@ -73,7 +73,7 @@ SKIP: landed cost under the minimum given; common titles (recent Disney/Pixar/ki
 
 For each pick, write the eBay Sold Items search query: the title words that identify the exact edition and format, including the label/edition words (e.g. "prestige manta lab steelbook", "burst angel complete collection blu-ray", "harry potter cassette 1-7 jim dale"). Set comp_condition to "sealed" when the Vinted condition is New with tags / New without tags or the title/description says sealed; "used" for Very good. A cassette must be comped against cassette sales, never CD.
 
-Return ONLY JSON: {"candidates":[{"id":<vinted id>,"why":"<one line>","ebay_query":"<query>","comp_condition":"sealed"|"used"}]} with at most the number of candidates requested, best first.''';
+Return ONLY compact JSON, no prose: {"candidates":[{"id":<vinted id>,"why":"<under 12 words>","ebay_query":"<query>","comp_condition":"sealed"|"used"}]} with at most the number of candidates requested, best first.''';
 
   Future<List<Map<String, dynamic>>> pickCandidates({
     required List<VintedListing> listings,
@@ -89,10 +89,23 @@ ${extraRules.trim().isEmpty ? '' : 'Extra rules from the reseller:\n${extraRules
 Pick up to $maxCandidates candidates from these ${listings.length} Vinted listings (id | format | condition | incl price | title):
 
 $lines''';
-    final text = await _ask(_pickSystem, user, maxTokens: 2500);
-    final j = _extractJson(text);
-    final list = (j['candidates'] as List?) ?? const [];
-    return list.whereType<Map<String, dynamic>>().toList();
+    final text = await _ask(_pickSystem, user, maxTokens: 8000);
+    try {
+      final j = _extractJson(text);
+      final list = (j['candidates'] as List?) ?? const [];
+      return list.whereType<Map<String, dynamic>>().toList();
+    } on FormatException {
+      // Reply was cut off or malformed: salvage every complete {...} object.
+      final out = <Map<String, dynamic>>[];
+      for (final m in RegExp(r'\{[^{}]*\}').allMatches(text)) {
+        try {
+          final o = jsonDecode(m.group(0)!);
+          if (o is Map<String, dynamic> && o.containsKey('id')) out.add(o);
+        } catch (_) {}
+      }
+      if (out.isEmpty) rethrow;
+      return out;
+    }
   }
 
   // ---------------------------------------------------------------- Stage 2
@@ -137,7 +150,7 @@ Comp against: ${c.compCondition == 'sealed' ? 'sealed / Brand New sales' : 'Pre-
 $desc${extraRules.trim().isEmpty ? '' : 'Extra rules from the reseller:\n${extraRules.trim()}\n'}
 EBAY SOLD ITEMS SEARCH TEXT (query: ${c.ebayQuery})
 $ebayText''';
-    final text = await _ask(_compSystem, user, maxTokens: 3000);
+    final text = await _ask(_compSystem, user, maxTokens: 6000);
     return _extractJson(text);
   }
 }
