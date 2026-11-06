@@ -1,4 +1,5 @@
 import 'net.dart';
+import 'web_fetcher.dart';
 
 class EbayException implements Exception {
   final String message;
@@ -9,9 +10,13 @@ class EbayException implements Exception {
 
 /// Fetches eBay's real Sold Items search (never Terapeak) and returns the
 /// page as plain text for the comp reader, plus the URL for the user.
+///
+/// eBay bot-checks plain HTTP clients, so the page is loaded in a hidden
+/// real browser engine first; plain HTTP is only a fallback.
 class EbayClient {
   final BrowserSession session;
-  EbayClient(this.session);
+  final WebFetcher web;
+  EbayClient(this.session, {WebFetcher? web}) : web = web ?? WebFetcher();
 
   static Uri soldSearchUri(String query, {required String compCondition}) {
     final qp = <String, String>{
@@ -30,6 +35,19 @@ class EbayClient {
   Future<String> soldSearchText(String query,
       {required String compCondition, int maxChars = 9000}) async {
     final uri = soldSearchUri(query, compCondition: compCondition);
+    String text;
+    try {
+      text = await web.pageText(uri.toString());
+    } on WebFetchException catch (e) {
+      throw EbayException('eBay: $e');
+    } catch (e) {
+      // Embedded browser unavailable on this device: try plain HTTP.
+      text = await _plainHttp(uri);
+    }
+    return _trim(text, maxChars);
+  }
+
+  Future<String> _plainHttp(Uri uri) async {
     var r = await session.get(uri);
     if (r.status == 503 || r.status == 429) {
       await Future<void>.delayed(const Duration(seconds: 10));
@@ -38,18 +56,19 @@ class EbayClient {
     if (!r.ok) {
       throw EbayException('eBay sold search failed (HTTP ${r.status}).');
     }
-    var text = htmlToText(r.body);
-    if (text.contains('Pardon Our Interruption') ||
-        text.contains('Checking your browser') ||
-        text.contains('verify you are a human')) {
+    final text = htmlToText(r.body);
+    if (WebFetcher.isChallenge(text)) {
       throw EbayException(
           'eBay showed a bot-check page instead of results. Wait a few minutes and scan again.');
     }
-    // Trim the header/filters chrome: start at the results count line if found.
+    return text;
+  }
+
+  static String _trim(String input, int maxChars) {
+    var text = input.replaceAll(RegExp(r'[ \t]+'), ' ').replaceAll(RegExp(r'\n\s*\n+'), '\n');
+    // Start at the results count line if found; skips the filter chrome.
     final idx = text.indexOf(RegExp(r'\d[\d,]* results? for '));
     if (idx > 0) text = text.substring(idx);
-    // Drop the "Results matching fewer words" tail if it is far down; the
-    // reader is told to ignore it anyway, but it saves tokens.
     final fewer = text.indexOf('Results matching fewer words');
     if (fewer > 2500) text = text.substring(0, fewer);
     if (text.length > maxChars) text = text.substring(0, maxChars);
