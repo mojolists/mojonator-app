@@ -101,7 +101,7 @@
   }
 
   function step() {
-    var st = load(RUN_KEY, null); if (!st || st.stopped || st.finished) return;
+    var st = load(RUN_KEY, null); if (!st || st.stopped || st.finished || !Array.isArray(st.jobs)) return;
     var doneIds = {}; (st.done || []).forEach(function (d) { doneIds[d.e] = 1; }); (st.errors || []).forEach(function (d) { doneIds[d.e] = 1; });
     var job = (st.jobs || []).filter(function (j) { return !doneIds[j.ebayItemId]; })[0];
     if (!job) { st.finished = new Date().toISOString(); st.current = null; saveK(RUN_KEY, st); return; }
@@ -127,7 +127,7 @@
     start: function (jobs, opts) {
       opts = opts || {};
       var st = load(RUN_KEY, null);
-      if (opts.fresh || !st || st.finished) { if (st) saveK(RUN_KEY + '_prev', st); st = { started: new Date().toISOString(), jobs: [], done: [], errors: [] }; }
+      if (opts.fresh || !st || st.finished || !Array.isArray(st.jobs)) { if (st) saveK(RUN_KEY + '_prev', st); st = { started: new Date().toISOString(), jobs: [], done: [], errors: [] }; }
       var have = {}; st.jobs.forEach(function (j) { have[j.ebayItemId] = 1; });
       (jobs || []).forEach(function (j) { if (!have[j.ebayItemId]) st.jobs.push(j); });
       delete st.stopped; delete st.finished; saveK(RUN_KEY, st);
@@ -139,9 +139,10 @@
     /* Compact status — read this ONCE at the end of a run. */
     status: function () {
       var st = load(RUN_KEY, null); if (!st) return { none: true };
-      var left = st.jobs.length - st.done.length - st.errors.length;
+      var jobs = st.jobs || [], done = st.done || [], errs = st.errors || [];
+      var left = jobs.length - done.length - errs.length;
       return { started: st.started, finished: st.finished || null, stopped: st.stopped || null, left: left, current: st.current || null,
-        done: st.done.map(function (d) { return d.e + '>' + d.v; }), errors: st.errors.map(function (e) { return e.e + ': ' + e.msg; }) };
+        done: done.map(function (d) { return d.e + '>' + d.v; }), errors: errs.map(function (e) { return e.e + ': ' + e.msg; }) };
     },
     /* After a run: duplicate active titles on the profile (Doug asked for this after every run). */
     dupCheck: function (memberId) {
