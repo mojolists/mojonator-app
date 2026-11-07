@@ -71,7 +71,7 @@
       return new Promise(function (res) { o.toBlob(function (bb) { res({ blob: bb || blob, box: box }); }, 'image/jpeg', 0.92); });
     });
   }
-  function bigEbay(u) { return String(u).replace(/s-l\d+(\.\w+)$/, 's-l1600$1'); }
+  function bigEbay(u) { return String(u).replace(/s-l\d+(\.\w+)$/, 's-l1600$1').replace(/\$_\d+\.(jpe?g|png|webp)/i, '$$_57.$1'); } // $_1 is a 400 px thumbnail; $_57 is full size
 
   function uploadPhoto(url, i, tempUuid) {
     return fetch(bigEbay(url)).then(function (r) { if (!r.ok) throw new Error('photo ' + r.status); return r.blob(); })
@@ -140,7 +140,7 @@
     status: function () {
       var st = load(RUN_KEY, null); if (!st) return { none: true };
       var jobs = st.jobs || [], done = st.done || [], errs = st.errors || [];
-      var left = jobs.length - done.length - errs.length;
+      var left = Math.max(0, jobs.length - done.length - errs.length);
       return { started: st.started, finished: st.finished || null, stopped: st.stopped || null, left: left, current: st.current || null,
         done: done.map(function (d) { return d.e + '>' + d.v; }), errors: errs.map(function (e) { return e.e + ': ' + e.msg; }) };
     },
