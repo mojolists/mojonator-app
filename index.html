@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mojonator — Reseller Insights</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="vinted-merge.js?v=133"></script><!-- MOJO_B132_VINTED -->
+<script src="vinted-merge.js?v=135"></script><!-- MOJO_B132_VINTED -->
 <style>
   :root{
     --green:#16a34a; --green-dark:#15803d; --green-light:#dcfce7; --green-soft:#f0fdf4;
@@ -216,7 +216,7 @@
       <a data-view="settings"><span class="ic">⚙</span> Settings</a>
       <a id="calcNav"><span class="ic">%</span> Price calc</a>
     </nav>
-    <div class="side-foot">Mojonator v1.0 (b134)<br><span id="syncFoot">Local · GitHub-sync ready</span></div>
+    <div class="side-foot">Mojonator v1.0 (b135)<br><span id="syncFoot">Local · GitHub-sync ready</span></div>
   </aside>
 
   <!-- Main -->
@@ -309,6 +309,9 @@ function ensureVintedChannel(st){
   if(st.feeRateV==null) st.feeRateV=0;
   if(!st.vintedMemberId) st.vintedMemberId='3201332793';
 }
+/* MOJO_B135_QTY: an unsold item can stand for several copies (multi-quantity eBay listing). */
+function qtyOf(it){ const q=parseInt(it&&it.quantity,10); return isSold(it)?1:(q>1?q:1); }
+function qtyBadge(it){ const q=qtyOf(it); return q>1?` <span class="status s-listed" title="${q} copies">×${q}</span>`:''; }
 function feeRateFor(acct){ const s=DATA.settings; if(acct==='V') return num(s.feeRateV); const r=s['feeRate'+acct]; return num(r!=null&&r!==''?r:s.feeRateA)||13.25; }
 function structuredCloneSafe(o){ return JSON.parse(JSON.stringify(o)); }
 function save(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(DATA)); localStorage.setItem(SETTINGS_KEY, JSON.stringify(DATA.settings)); }catch(e){} }
@@ -316,7 +319,7 @@ function save(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(DATA)); localS
 /* ---------------- GitHub sync (pull/push data.json) ---------------- */
 /* Repo data.json is the source of truth. The GitHub Action writes eBay
    sales into it server-side; the app pulls it, you add costs, you push. */
-const EBAY_FIELDS = ['title','salePrice','saleDate','ebayFees','shipCost','status','marketplace','ebayItemId','shipCostSource','shipLabelTx','shippedAt']; /* MOJO_B131_BULKLABELS: bulk-label split bookkeeping from the sync must survive a Push */
+const EBAY_FIELDS = ['title','salePrice','saleDate','ebayFees','shipCost','status','marketplace','ebayItemId','shipCostSource','shipLabelTx','shippedAt','quantity']; /* MOJO_B135_QTY: copies still available on a multi-quantity listing */ /* MOJO_B131_BULKLABELS: bulk-label split bookkeeping from the sync must survive a Push */
 /* MOJO_B132_VINTED: fields the Vinted sync owns. Whichever side changed them last (vUpdated)
    wins, so a Push can no longer overwrite what the userscript wrote, and a link made in the
    app is not undone by an older copy in the repo. */
@@ -641,7 +644,7 @@ function renderDashboard(c){
   const net=sold.reduce((s,it)=>s+(netProfit(it)||0),0);
   const units=sold.length;
   const invItems=acctItems().filter(it=>!isSold(it)&&it.status!=='returned'&&it.status!=='bundled'); /* MOJO_B125_BUNDLES: components live inside their bundle item */
-  const cashIn=invItems.reduce((s,it)=>s+num(it.cost),0);
+  const cashIn=invItems.reduce((s,it)=>s+num(it.cost)*qtyOf(it),0); const invUnits=invItems.reduce((s,it)=>s+qtyOf(it),0);
   const rois=sold.map(roi).filter(x=>x!=null);
   const avgRoi=rois.length?rois.reduce((a,b)=>a+b,0)/rois.length:null;
   const revenue=sold.reduce((s,it)=>s+num(it.salePrice)-num(it.refund),0);
@@ -654,7 +657,7 @@ function renderDashboard(c){
     ${kpi('Avg ROI',pct(avgRoi),avgRoi>=0?'pos':'neg','per sold item')}
     ${kpi('Net margin',pct(margin),margin>=0?'pos':'neg','net ÷ revenue')}
     ${kpi('Units sold',units,'', 'in selected range')}
-    ${kpi('Cash in inventory',money0(cashIn),'',invItems.length+' unsold items')}
+    ${kpi('Cash in inventory',money0(cashIn),'',invUnits+' unsold copies')}
   </div>
   <div class="grid2">
     <div class="panel"><div class="panel-head"><h2>Gross vs. net over time</h2></div><div class="panel-body"><canvas id="trendChart" height="220"></canvas></div></div>
@@ -727,7 +730,7 @@ function renderListed(c){
     <thead><tr><th class="selcell"><input type="checkbox" ${items.length&&items.every(i=>BULKSEL.has(i.id))?'checked':''} onclick="selAllVis(this.checked)" title="Select all"></th>${th('sku','SKU','tight')}${th('itemId','Item ID')}${th('title','Title')}<th>Acct</th>${th('cost','Purchase $','num')}${th('source','Purchased at')}${th('purchaseDate','Bought','num tight')}${th('askingPrice','Asking','num')}${th('listedDate','Listed','num')}<th class="num">Days</th><th class="num" title="Next auto-relist">Relist</th><th></th></tr></thead>
     <tbody>${items.map(rowListed).join('')||emptyRow(13,'Nothing listed yet. Connect eBay or add an item.')}</tbody>
   </table></div></div>
-  <div class="muted" style="margin-top:10px">${items.length} listed · ${money(items.reduce((s,it)=>s+num(it.cost),0))} cost tied up · ${money(items.reduce((s,it)=>s+num(it.askingPrice),0))} asking</div>`;
+  <div class="muted" style="margin-top:10px">${items.length} listings · ${items.reduce((s,it)=>s+qtyOf(it),0)} copies · ${money(items.reduce((s,it)=>s+num(it.cost)*qtyOf(it),0))} cost tied up · ${money(items.reduce((s,it)=>s+num(it.askingPrice)*qtyOf(it),0))} asking</div>`;
   invSearchWire(c,renderListed);
 }
 function rowListed(it){
@@ -735,7 +738,7 @@ function rowListed(it){
     <td class="selcell"><input type="checkbox" ${BULKSEL.has(it.id)?'checked':''} onclick="toggleSel('${it.id}',this.checked)"></td>
     <td class="tight cell-sku" title="${esc(it.sku||'')}"><strong>${esc(it.sku||'—')}</strong>${it.pendingSku!=null?(it.pendingSkuErr?` <span title="eBay label update FAILED: ${esc(it.pendingSkuErr)} — will retry next sync" style="color:var(--red)">⚠</span>`:' <span title="Label update queued — applies to eBay on the next sync after you Push" class="muted">⏳</span>'):''}</td>
     <td>${esc(it.itemId||'—')}</td>
-    <td class="cell-title" title="${esc(it.title||'')}">${esc(it.title||'')}</td>
+    <td class="cell-title" title="${esc(it.title||'')}">${esc(it.title||'')}${qtyBadge(it)}</td>
     <td><span class="acct-badge acct-${it.account}">${esc(acctName(it.account))}</span></td>
     <td class="num">${it.cost?money(num(it.cost)):'—'}</td>
     <td>${esc(it.source||'—')}</td>
@@ -1488,7 +1491,7 @@ calcInit();
 const VSEL={}; const VSEARCH={};
 function vintedNavBadge(){ const el=document.getElementById('vintedNavBadge'); if(!el) return; const n=DATA.items.filter(it=>it.vintedMatch==='pending').length; el.innerHTML=n?` <span class="status s-listed" style="margin-left:4px">${n}</span>`:''; }
 function vDays(d){ return d? Math.max(0,daysBetween(d,todayISO())) : ''; }
-function vCandLabel(it){ return `${esc(it.title||'')} <span class="muted">· ${esc(it.sku||'no SKU')} · ${esc(it.status)}${it.bundleOf?' · bundle':''}${it.status==='listed'?' · STILL LISTED ON EBAY':''}</span>${it.ebayItemId?` <a href="https://www.ebay.com/itm/${esc(it.ebayItemId)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Open the eBay listing (photos)">eBay ↗</a>`:''}`; }
+function vCandLabel(it){ return `${esc(it.title||'')}${qtyBadge(it)} <span class="muted">· ${esc(it.sku||'no SKU')} · ${esc(it.status)}${it.bundleOf?' · bundle':''}${it.status==='listed'?' · STILL LISTED ON EBAY':''}</span>${it.ebayItemId?` <a href="https://www.ebay.com/itm/${esc(it.ebayItemId)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Open the eBay listing (photos)">eBay ↗</a>`:''}`; }
 /* MOJO_B133: photos popup + direct Vinted link */
 function vButtons(it){
   const n=(it.vintedPhotos||[]).length;
@@ -1526,7 +1529,8 @@ function renderVinted(c){
   const kpi=(l,v,sub)=>`<div class="card kpi"><div class="label">${l}</div><div class="val">${v}</div>${sub?`<div class="sub">${sub}</div>`:''}</div>`;
   const pendRows=pend.map(p=>{
     const sel0=VSEL[p.id]||new Set(); /* MOJO_B134: ticked items stay on screen after a new search */
-    const cands=[...[...sel0].map(id=>byId.get(id)).filter(Boolean), ...(VSEARCH[p.id]||[]).map(id=>byId.get(id)).filter(it=>it&&!it.vintedId), ...(Array.isArray(p.vintedCandidates)?p.vintedCandidates:[]).map(id=>byId.get(id)).filter(it=>it&&!it.vintedId)];
+    const freeOk=it=>it&&(!it.vintedId||qtyOf(it)>1); /* MOJO_B135_QTY: a linked item with spare copies can take another Vinted listing */
+    const cands=[...[...sel0].map(id=>byId.get(id)).filter(Boolean), ...(VSEARCH[p.id]||[]).map(id=>byId.get(id)).filter(freeOk), ...(Array.isArray(p.vintedCandidates)?p.vintedCandidates:[]).map(id=>byId.get(id)).filter(freeOk)];
     const seen=new Set(); const list=cands.filter(it=>!seen.has(it.id)&&seen.add(it.id));
     const sel=VSEL[p.id]||new Set();
     return `<tr><td style="max-width:340px"><strong>${p.vintedUrl?`<a href="${esc(p.vintedUrl)}" target="_blank" rel="noopener">${esc(p.title)}</a>`:esc(p.title)}</strong>

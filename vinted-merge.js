@@ -18,7 +18,7 @@
        orders:[{txId,title,price,date,status}], runner:[{vintedId,ebayItemId,title,price,listedAt}] } */
 (function (root) {
   'use strict';
-  var VERSION = 'v2'; // v2: carries listing photo URLs (vintedPhotos)
+  var VERSION = 'v3'; // v2: listing photo URLs (vintedPhotos); v3: multi-copy items (quantity) split one copy per Vinted listing
   var STOP = {}; 'cd cds dvd dvds blu ray bluray the of a an and with new like good very used disc discs edition lot in to for by on movie movies album'.split(' ').forEach(function (w) { STOP[w] = 1; });
 
   function toks(s) {
@@ -145,7 +145,10 @@
     // 1. Listing-runner records: exact eBay item number -> exact link.
     (snap.runner || []).forEach(function (r) {
       var vid = String(r.vintedId || ''); if (!vid || byVid[vid]) return;
-      var it = (byEbay[String(r.ebayItemId || '')] || []).filter(function (x) { return !x.vintedId; })[0];
+      var grp = byEbay[String(r.ebayItemId || '')] || [];
+      var it = grp.filter(function (x) { return !x.vintedId && !isSold(x) && x.status !== 'bundled'; })[0];
+      if (it && qty(it) > 1) it = splitCopy(items, it);
+      if (!it) { var multi = grp.filter(function (x) { return qty(x) > 1; })[0]; if (multi) it = splitCopy(items, multi); }
       var L = wardrobe[vid] || { id: vid, title: r.title, price: r.price, url: 'https://www.vinted.com/items/' + vid };
       L.listedAt = (r.listedAt || '').slice(0, 10) || L.listedAt;
       if (wardrobe[vid]) wardrobe[vid].listedAt = L.listedAt;
@@ -220,10 +223,22 @@
     return rep;
   }
 
+  /* v3: an item can stand for several copies (quantity, from a multi-quantity eBay listing). Each Vinted
+     listing gets ONE copy: splitCopy() peels one copy off into its own item (same SKU/location/cost),
+     leaving the rest on the original. */
+  function qty(it) { var q = parseInt(it && it.quantity, 10); return q > 1 ? q : 1; }
+  function splitCopy(items, t) {
+    var n = JSON.parse(JSON.stringify(t)); n.id = uid(); n.quantity = 1; t.quantity = qty(t) - 1;
+    if (n.account === 'V') { n.account = n.prevAccount || 'A'; n.marketplace = 'eBay'; n.askingPrice = n.prevAskingPrice != null ? n.prevAskingPrice : ''; n.listedDate = n.prevListedDate || ''; n.status = 'sourced'; }
+    ['vintedId', 'vintedUrl', 'vintedPrice', 'vintedListedDate', 'vintedStatus', 'vintedTxId', 'vintedOrderStatus', 'vintedLastSeen', 'vintedMatch', 'vintedCandidates', 'vintedNote', 'vintedPhotos', 'vintedCreated'].forEach(function (f) { delete n[f]; });
+    if (isSold(n)) { n.status = 'sourced'; n.salePrice = ''; n.saleDate = ''; }
+    items.push(n); return n;
+  }
   /* Confirm queue actions (app). */
   function link(items, pendingId, targetId) {
     var p = items.filter(function (x) { return x.id === pendingId; })[0], t = items.filter(function (x) { return x.id === targetId; })[0];
-    if (!p || !t || t.vintedId) return false;
+    if (!p || !t) return false;
+    if (t.vintedId || qty(t) > 1) { if (qty(t) < 2) return false; t = splitCopy(items, t); }
     var now = new Date().toISOString();
     convert(t, { id: p.vintedId, url: p.vintedUrl, listedAt: p.vintedListedDate }, 'confirmed', now);
     ['vintedPrice', 'askingPrice', 'vintedStatus', 'vintedTxId', 'vintedOrderStatus', 'vintedLastSeen', 'vintedPhotos'].forEach(function (f) { if (p[f] !== undefined) t[f] = p[f]; });
@@ -256,7 +271,7 @@
   function search(items, q, title) {
     var qt = toks(q || title), out = [];
     items.forEach(function (it) {
-      if (it.vintedId || it.account === 'V' || isSold(it) || it.status === 'bundled' || it.status === 'returned') return;
+      if (((it.vintedId || it.account === 'V') && qty(it) < 2) || isSold(it) || it.status === 'bundled' || it.status === 'returned') return;
       var s = score(qt, toks(it.title)); if (s > 0.15) out.push({ it: it, s: s });
     });
     out.sort(function (a, b) { return b.s - a.s; });
@@ -289,7 +304,7 @@
       .then(function () { return { at: new Date().toISOString(), complete: complete, memberId: String(memberId), wardrobe: wardrobe, orders: orders, runner: runnerLog || [] }; });
   }
 
-  var api = { VERSION: VERSION, merge: merge, dedupe: dedupe, link: link, keepAsNew: keepAsNew, unlink: unlink, search: search, rank: rank, decide: decide, collect: collect, _score: function (a, b) { return score(toks(a), toks(b)); } };
+  var api = { VERSION: VERSION, splitCopy: splitCopy, merge: merge, dedupe: dedupe, link: link, keepAsNew: keepAsNew, unlink: unlink, search: search, rank: rank, decide: decide, collect: collect, _score: function (a, b) { return score(toks(a), toks(b)); } };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.MojoVinted = api;
 })(typeof window !== 'undefined' ? window : this);
