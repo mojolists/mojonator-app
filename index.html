@@ -216,7 +216,7 @@
       <a data-view="settings"><span class="ic">⚙</span> Settings</a>
       <a id="calcNav"><span class="ic">%</span> Price calc</a>
     </nav>
-    <div class="side-foot">Mojonator v1.0 (b133)<br><span id="syncFoot">Local · GitHub-sync ready</span></div>
+    <div class="side-foot">Mojonator v1.0 (b134)<br><span id="syncFoot">Local · GitHub-sync ready</span></div>
   </aside>
 
   <!-- Main -->
@@ -1525,7 +1525,8 @@ function renderVinted(c){
   const imp=STATE.vimport;
   const kpi=(l,v,sub)=>`<div class="card kpi"><div class="label">${l}</div><div class="val">${v}</div>${sub?`<div class="sub">${sub}</div>`:''}</div>`;
   const pendRows=pend.map(p=>{
-    const cands=[...(Array.isArray(p.vintedCandidates)?p.vintedCandidates:[]).map(id=>byId.get(id)).filter(it=>it&&!it.vintedId), ...(VSEARCH[p.id]||[]).map(id=>byId.get(id)).filter(it=>it&&!it.vintedId)];
+    const sel0=VSEL[p.id]||new Set(); /* MOJO_B134: ticked items stay on screen after a new search */
+    const cands=[...[...sel0].map(id=>byId.get(id)).filter(Boolean), ...(VSEARCH[p.id]||[]).map(id=>byId.get(id)).filter(it=>it&&!it.vintedId), ...(Array.isArray(p.vintedCandidates)?p.vintedCandidates:[]).map(id=>byId.get(id)).filter(it=>it&&!it.vintedId)];
     const seen=new Set(); const list=cands.filter(it=>!seen.has(it.id)&&seen.add(it.id));
     const sel=VSEL[p.id]||new Set();
     return `<tr><td style="max-width:340px"><strong>${p.vintedUrl?`<a href="${esc(p.vintedUrl)}" target="_blank" rel="noopener">${esc(p.title)}</a>`:esc(p.title)}</strong>
