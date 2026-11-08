@@ -216,7 +216,7 @@
       <a data-view="settings"><span class="ic">⚙</span> Settings</a>
       <a id="calcNav"><span class="ic">%</span> Price calc</a>
     </nav>
-    <div class="side-foot">Mojonator v1.0 (b135)<br><span id="syncFoot">Local · GitHub-sync ready</span></div>
+    <div class="side-foot">Mojonator v1.0 (b136)<br><span id="syncFoot">Local · GitHub-sync ready</span></div>
   </aside>
 
   <!-- Main -->
@@ -374,7 +374,7 @@ function clientMerge(incoming){ /* MOJO_V113_MERGEFIX */
       if(m.pendingSku!=null && inc.sku===m.pendingSku){ delete m.pendingSku; delete m.pendingSkuErr; }
       if(inc.ebayItemId && inc.sku && m.pendingSku==null){ m.sku=inc.sku; if(inc.location && inc.location===inc.sku) m.location=inc.location; }
       if(inc.pendingSkuErr && m.pendingSku!=null) m.pendingSkuErr=inc.pendingSkuErr;
-      EBAY_FIELDS.forEach(f=>{ if(inc[f]!==''&&inc[f]!=null){ if(vSkip && VINTED_FIELDS.includes(f)) return; if(f==='status'&&m.status==='bundled'&&!isSold(inc)) return; /* MOJO_B125: a local bundling sticks until pushed */ m[f]=inc[f]; } });
+      EBAY_FIELDS.forEach(f=>{ if(inc[f]!==''&&inc[f]!=null){ if(vSkip && VINTED_FIELDS.includes(f)) return; if(m.account==='V' && f==='title') return; /* MOJO_B136: a Vinted item's title is edited here, not by the eBay sync */ if(f==='status'&&m.status==='bundled'&&!isSold(inc)) return; /* MOJO_B125: a local bundling sticks until pushed */ m[f]=inc[f]; } });
       MANUAL_FIELDS.forEach(f=>{ const empty=(m[f]===''||m[f]==null||(Array.isArray(m[f])&&!m[f].length)); if(empty && inc[f]!=null && inc[f]!=='') m[f]=inc[f]; });
       updated++;
     } else { DATA.items.push(inc); added++; }
