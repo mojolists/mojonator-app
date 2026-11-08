@@ -18,7 +18,7 @@
        orders:[{txId,title,price,date,status}], runner:[{vintedId,ebayItemId,title,price,listedAt}] } */
 (function (root) {
   'use strict';
-  var VERSION = 'v1';
+  var VERSION = 'v2'; // v2: carries listing photo URLs (vintedPhotos)
   var STOP = {}; 'cd cds dvd dvds blu ray bluray the of a an and with new like good very used disc discs edition lot in to for by on movie movies album'.split(' ').forEach(function (w) { STOP[w] = 1; });
 
   function toks(s) {
@@ -165,6 +165,7 @@
       }
       var price = parseFloat(L.price); if (!isNaN(price)) { it.vintedPrice = price; it.askingPrice = price; }
       if (L.url) it.vintedUrl = L.url;
+      if (L.photos && L.photos.length) it.vintedPhotos = L.photos.slice(0, 20);
       if (!it.vintedListedDate) { it.vintedListedDate = L.listedAt || day; it.listedDate = it.vintedListedDate; }
       it.vintedLastSeen = day;
       var sold = L.closed && (L.closing === 'sold' || !L.closing);
@@ -225,7 +226,7 @@
     if (!p || !t || t.vintedId) return false;
     var now = new Date().toISOString();
     convert(t, { id: p.vintedId, url: p.vintedUrl, listedAt: p.vintedListedDate }, 'confirmed', now);
-    ['vintedPrice', 'askingPrice', 'vintedStatus', 'vintedTxId', 'vintedOrderStatus', 'vintedLastSeen'].forEach(function (f) { if (p[f] !== undefined) t[f] = p[f]; });
+    ['vintedPrice', 'askingPrice', 'vintedStatus', 'vintedTxId', 'vintedOrderStatus', 'vintedLastSeen', 'vintedPhotos'].forEach(function (f) { if (p[f] !== undefined) t[f] = p[f]; });
     if (isSold(p)) { t.status = p.status; t.salePrice = p.salePrice; t.saleDate = p.saleDate; t.ebayFees = 0; t.shipCost = 0; }
     else if (p.status === 'sourced') t.status = 'sourced';
     items.splice(items.indexOf(p), 1);
@@ -240,13 +241,13 @@
     var now = new Date().toISOString();
     if (t.vintedCreated) { t.vintedMatch = 'pending'; t.vintedNote = 'unlinked by you'; t.vUpdated = now; return true; }
     var p = newPending({ id: t.vintedId, title: t.title, url: t.vintedUrl, listedAt: t.vintedListedDate }, [], 'unlinked by you', now);
-    ['vintedPrice', 'askingPrice', 'vintedStatus', 'vintedTxId', 'vintedOrderStatus', 'vintedLastSeen', 'salePrice', 'saleDate', 'status'].forEach(function (f) { if (t[f] !== undefined) p[f] = t[f]; });
+    ['vintedPrice', 'askingPrice', 'vintedStatus', 'vintedTxId', 'vintedOrderStatus', 'vintedLastSeen', 'vintedPhotos', 'salePrice', 'saleDate', 'status'].forEach(function (f) { if (t[f] !== undefined) p[f] = t[f]; });
     p.vintedCandidates = [t.id];
     t.account = t.prevAccount || 'A'; t.marketplace = 'eBay';
     t.askingPrice = t.prevAskingPrice != null ? t.prevAskingPrice : ''; t.listedDate = t.prevListedDate || '';
     if (isSold(t)) { t.salePrice = ''; t.saleDate = ''; t.ebayFees = ''; t.shipCost = ''; }
     t.status = 'sourced';
-    ['vintedId', 'vintedUrl', 'vintedPrice', 'vintedListedDate', 'vintedStatus', 'vintedTxId', 'vintedOrderStatus', 'vintedLastSeen', 'vintedMatch', 'vintedCandidates', 'vintedNote'].forEach(function (f) { t[f] = ''; });
+    ['vintedId', 'vintedUrl', 'vintedPrice', 'vintedListedDate', 'vintedStatus', 'vintedTxId', 'vintedOrderStatus', 'vintedLastSeen', 'vintedMatch', 'vintedCandidates', 'vintedNote', 'vintedPhotos'].forEach(function (f) { t[f] = ''; });
     t.vUpdated = now;
     items.push(p);
     return true;
@@ -263,12 +264,13 @@
   }
 
   /* Build a snapshot on vinted.com (userscript + bookmarklet). fetchJson(url) -> Promise<json>. */
+  function photoUrls(o) { return (o.photos || []).map(function (p) { return p.full_size_url || p.url || ''; }).filter(Boolean); }
   function collect(fetchJson, memberId, runnerLog) {
     var wardrobe = [], orders = [], complete = true;
     function pageW(p) {
       return fetchJson('/api/v2/wardrobe/' + memberId + '/items?page=' + p + '&per_page=96&order=newest_first').then(function (j) {
         (j.items || []).forEach(function (o) {
-          wardrobe.push({ id: o.id, title: o.title, price: o.price && o.price.amount, cond: o.status, closed: !!o.is_closed, reserved: !!o.is_reserved, hidden: !!o.is_hidden, closing: o.item_closing_action || '', url: o.url });
+          wardrobe.push({ id: o.id, title: o.title, price: o.price && o.price.amount, cond: o.status, closed: !!o.is_closed, reserved: !!o.is_reserved, hidden: !!o.is_hidden, closing: o.item_closing_action || '', url: o.url, photos: photoUrls(o) });
         });
         var tp = (j.pagination && j.pagination.total_pages) || 1;
         if (p < tp && p < 50) return pageW(p + 1);

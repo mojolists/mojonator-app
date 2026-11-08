@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mojonator — Reseller Insights</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="vinted-merge.js?v=132"></script><!-- MOJO_B132_VINTED -->
+<script src="vinted-merge.js?v=133"></script><!-- MOJO_B132_VINTED -->
 <style>
   :root{
     --green:#16a34a; --green-dark:#15803d; --green-light:#dcfce7; --green-soft:#f0fdf4;
@@ -112,6 +112,11 @@
   .acct-badge{font-size:10px;font-weight:700;padding:1px 7px;border-radius:5px;background:#eef2ff;color:#4338ca}
   .acct-B{background:#fef9c3;color:#854d0e}
   .acct-V{background:#ccfbf1;color:#0f766e} /* MOJO_B132_VINTED */
+  .vbtns{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}.vbtns .btn{padding:3px 10px;font-size:12px}
+  #vPhotoBox{position:fixed;inset:0;background:rgba(15,23,42,.75);z-index:9999;display:none;align-items:flex-start;justify-content:center;overflow:auto;padding:30px 16px}
+  #vPhotoBox .inner{background:#fff;border-radius:14px;max-width:1100px;width:100%;padding:16px 18px;box-shadow:0 20px 60px rgba(0,0,0,.4)}
+  #vPhotoBox .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;margin-top:12px}
+  #vPhotoBox img{width:100%;border-radius:8px;border:1px solid var(--line);cursor:zoom-in;background:#f8fafc}
   .vq td{vertical-align:top}.vq label{display:block;font-size:12px;margin:2px 0;cursor:pointer}.vq .why{font-size:11px;color:#b45309}
 
   .tablewrap{overflow-x:auto}
@@ -211,7 +216,7 @@
       <a data-view="settings"><span class="ic">⚙</span> Settings</a>
       <a id="calcNav"><span class="ic">%</span> Price calc</a>
     </nav>
-    <div class="side-foot">Mojonator v1.0 (b132)<br><span id="syncFoot">Local · GitHub-sync ready</span></div>
+    <div class="side-foot">Mojonator v1.0 (b133)<br><span id="syncFoot">Local · GitHub-sync ready</span></div>
   </aside>
 
   <!-- Main -->
@@ -317,7 +322,7 @@ const EBAY_FIELDS = ['title','salePrice','saleDate','ebayFees','shipCost','statu
    app is not undone by an older copy in the repo. */
 const VINTED_FIELDS = ['account','marketplace','askingPrice','listedDate','status','salePrice','saleDate','ebayFees','shipCost','firstListed','firstListedSource',
   'vintedId','vintedUrl','vintedPrice','vintedListedDate','vintedStatus','vintedTxId','vintedOrderStatus','vintedLastSeen','vintedMatch','vintedCandidates','vintedNote','vintedCreated',
-  'prevAccount','prevAskingPrice','prevListedDate','vUpdated'];
+  'prevAccount','prevAskingPrice','prevListedDate','vUpdated','vintedPhotos'];
 const MANUAL_FIELDS = ['cost','source','location','category','purchaseDate','tags','custom','notes','consignPartner','consignSplit','itemId','sku','listedDate','refund','otherFees','autoRelist','firstListed'];
 function b64encode(s){ return btoa(unescape(encodeURIComponent(s))); }
 function b64decode(s){ return decodeURIComponent(escape(atob(s.replace(/\s/g,'')))); }
@@ -1483,10 +1488,28 @@ calcInit();
 const VSEL={}; const VSEARCH={};
 function vintedNavBadge(){ const el=document.getElementById('vintedNavBadge'); if(!el) return; const n=DATA.items.filter(it=>it.vintedMatch==='pending').length; el.innerHTML=n?` <span class="status s-listed" style="margin-left:4px">${n}</span>`:''; }
 function vDays(d){ return d? Math.max(0,daysBetween(d,todayISO())) : ''; }
-function vCandLabel(it){ return `${esc(it.title||'')} <span class="muted">· ${esc(it.sku||'no SKU')} · ${esc(it.status)}${it.bundleOf?' · bundle':''}${it.status==='listed'?' · STILL LISTED ON EBAY':''}</span>`; }
+function vCandLabel(it){ return `${esc(it.title||'')} <span class="muted">· ${esc(it.sku||'no SKU')} · ${esc(it.status)}${it.bundleOf?' · bundle':''}${it.status==='listed'?' · STILL LISTED ON EBAY':''}</span>${it.ebayItemId?` <a href="https://www.ebay.com/itm/${esc(it.ebayItemId)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Open the eBay listing (photos)">eBay ↗</a>`:''}`; }
+/* MOJO_B133: photos popup + direct Vinted link */
+function vButtons(it){
+  const n=(it.vintedPhotos||[]).length;
+  return `<div class="vbtns"><button class="btn ghost" onclick="vPhotos('${it.id}')">📷 Photos${n?' ('+n+')':''}</button>${it.vintedUrl?`<a class="btn ghost" href="${esc(it.vintedUrl)}" target="_blank" rel="noopener">Open on Vinted ↗</a>`:''}</div>`;
+}
+function vPhotos(id){
+  const it=DATA.items.find(x=>x.id===id); if(!it) return;
+  let box=document.getElementById('vPhotoBox');
+  if(!box){ box=document.createElement('div'); box.id='vPhotoBox'; box.onclick=e=>{ if(e.target===box) box.style.display='none'; }; document.body.appendChild(box); }
+  const ph=it.vintedPhotos||[];
+  box.innerHTML=`<div class="inner"><div style="display:flex;align-items:center;gap:10px"><h3 style="font-size:16px;margin:0;flex:1">${esc(it.title||'')}</h3>
+      ${it.vintedUrl?`<a class="btn ghost" href="${esc(it.vintedUrl)}" target="_blank" rel="noopener">Open on Vinted ↗</a>`:''}
+      <button class="btn ghost" onclick="document.getElementById('vPhotoBox').style.display='none'">Close ✕</button></div>
+    ${ph.length?`<div class="grid">${ph.map(u=>`<a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(u)}" loading="lazy" alt=""></a>`).join('')}</div>`
+      :`<p class="muted" style="margin-top:14px">No photos stored for this listing yet — they come in with the next Vinted sync (userscript, or the Vinted → Mojonator button). Use “Open on Vinted” meanwhile.</p>`}</div>`;
+  box.style.display='flex';
+}
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ const b=document.getElementById('vPhotoBox'); if(b) b.style.display='none'; } });
 function vintedBookmarklet(){
   const mid=String(DATA.settings.vintedMemberId||'3201332793').replace(/\D/g,'');
-  const code=`(async()=>{try{const H={accept:'application/json'};const g=u=>fetch(u,{headers:H}).then(r=>{if(!r.ok)throw Error(u+' '+r.status);return r.json()});let w=[],p=1,tp=1;do{const j=await g('/api/v2/wardrobe/${mid}/items?page='+p+'&per_page=96&order=newest_first');(j.items||[]).forEach(o=>w.push({id:o.id,title:o.title,price:o.price&&o.price.amount,cond:o.status,closed:!!o.is_closed,reserved:!!o.is_reserved,hidden:!!o.is_hidden,closing:o.item_closing_action||'',url:o.url}));tp=(j.pagination||{}).total_pages||1;p++}while(p<=tp&&p<50);let o=[];try{let q=1,n;do{const j=await g('/api/v2/my_orders?type=sold&status=all&per_page=100&page='+q);n=(j.my_orders||[]);n.forEach(x=>o.push({txId:x.transaction_id,title:x.title,price:x.price&&x.price.amount,date:x.date,status:x.status}));q++}while(n.length>=100&&q<50)}catch(e){}let r=[];try{r=JSON.parse(localStorage.getItem('__mojo_vinted_log')||'[]')}catch(e){}const s={at:new Date().toISOString(),complete:true,memberId:'${mid}',wardrobe:w,orders:o,runner:r};location.href='https://mojolists.com/mojonator-app/#vimport='+encodeURIComponent(JSON.stringify(s))}catch(e){alert('Mojonator Vinted export failed: '+e.message+' (are you signed in to Vinted?)')}})()`;
+  const code=`(async()=>{try{const H={accept:'application/json'};const g=u=>fetch(u,{headers:H}).then(r=>{if(!r.ok)throw Error(u+' '+r.status);return r.json()});let w=[],p=1,tp=1;do{const j=await g('/api/v2/wardrobe/${mid}/items?page='+p+'&per_page=96&order=newest_first');(j.items||[]).forEach(o=>w.push({id:o.id,title:o.title,price:o.price&&o.price.amount,cond:o.status,closed:!!o.is_closed,reserved:!!o.is_reserved,hidden:!!o.is_hidden,closing:o.item_closing_action||'',url:o.url,photos:(o.photos||[]).map(p=>p.full_size_url||p.url).filter(Boolean)}));tp=(j.pagination||{}).total_pages||1;p++}while(p<=tp&&p<50);let o=[];try{let q=1,n;do{const j=await g('/api/v2/my_orders?type=sold&status=all&per_page=100&page='+q);n=(j.my_orders||[]);n.forEach(x=>o.push({txId:x.transaction_id,title:x.title,price:x.price&&x.price.amount,date:x.date,status:x.status}));q++}while(n.length>=100&&q<50)}catch(e){}let r=[];try{r=JSON.parse(localStorage.getItem('__mojo_vinted_log')||'[]')}catch(e){}const s={at:new Date().toISOString(),complete:true,memberId:'${mid}',wardrobe:w,orders:o,runner:r};location.href='https://mojolists.com/mojonator-app/#vimport='+encodeURIComponent(JSON.stringify(s))}catch(e){alert('Mojonator Vinted export failed: '+e.message+' (are you signed in to Vinted?)')}})()`;
   return 'javascript:'+encodeURIComponent(code);
 }
 function renderVinted(c){
@@ -1506,14 +1529,15 @@ function renderVinted(c){
     const seen=new Set(); const list=cands.filter(it=>!seen.has(it.id)&&seen.add(it.id));
     const sel=VSEL[p.id]||new Set();
     return `<tr><td style="max-width:340px"><strong>${p.vintedUrl?`<a href="${esc(p.vintedUrl)}" target="_blank" rel="noopener">${esc(p.title)}</a>`:esc(p.title)}</strong>
-        <div class="why">${esc(p.vintedNote||'')}</div><div class="muted" style="font-size:11px">${money(num(p.vintedPrice||p.askingPrice))} · ${esc(p.vintedStatus||'')}${isSold(p)?' · SOLD '+esc(p.saleDate||''):''}</div></td>
+        <div class="why">${esc(p.vintedNote||'')}</div><div class="muted" style="font-size:11px">${money(num(p.vintedPrice||p.askingPrice))} · ${esc(p.vintedStatus||'')}${isSold(p)?' · SOLD '+esc(p.saleDate||''):''}</div>
+        ${vButtons(p)}</td>
       <td>${list.length?list.map(it=>`<label><input type="checkbox" ${sel.has(it.id)?'checked':''} onchange="vToggle('${p.id}','${it.id}',this.checked)"> ${vCandLabel(it)}</label>`).join(''):'<span class="muted" style="font-size:12px">No suggestions — search below.</span>'}
         <div style="display:flex;gap:6px;margin-top:6px"><input type="text" placeholder="Search Mojonator titles…" style="flex:1" onkeydown="if(event.key==='Enter')vSearch('${p.id}',this.value)"><button class="btn ghost" onclick="vSearch('${p.id}',this.previousElementSibling.value)">Search</button></div></td>
       <td style="white-space:nowrap"><button class="btn" onclick="vLinkSel('${p.id}')" title="One ticked: link it. Several ticked: bundle them and link the bundle.">${sel.size>1?'Bundle '+sel.size+' &amp; link':'Link'}</button><br>
         <button class="btn ghost" style="margin-top:6px" onclick="vKeep('${p.id}')" title="Not in Mojonator — keep it as its own Vinted item">Keep as new</button></td></tr>`;
   }).join('');
   const linkedRows=linked.slice().sort((a,b)=>String(b.vintedListedDate||'').localeCompare(String(a.vintedListedDate||''))).map(it=>`<tr>
-      <td>${it.vintedUrl?`<a href="${esc(it.vintedUrl)}" target="_blank" rel="noopener">${esc(it.title)}</a>`:esc(it.title)}</td><td>${mediaPill(it)}</td>
+      <td>${it.vintedUrl?`<a href="${esc(it.vintedUrl)}" target="_blank" rel="noopener">${esc(it.title)}</a>`:esc(it.title)} <button class="btn ghost" style="padding:1px 7px;font-size:11px" onclick="vPhotos('${it.id}')" title="Photos">📷</button></td><td>${mediaPill(it)}</td>
       <td>${esc(it.location||it.sku||'—')}</td><td class="num">${money(num(it.vintedPrice||it.askingPrice))}</td>
       <td>${esc(it.vintedListedDate||'—')}</td><td class="num">${isSold(it)?'—':vDays(it.vintedListedDate)}</td>
       <td><span class="status s-${esc(it.status)}">${esc(it.status)}</span> <span class="muted" style="font-size:11px">${esc(it.vintedStatus||'')}</span></td>
