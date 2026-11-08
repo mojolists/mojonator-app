@@ -9,7 +9,7 @@ The low-token eBay → Vinted route, proven on the 2026-11-06/07 CD runs. Nothin
 | 3. End on eBay | `tools/ebaytrade.py` in the **private** repo `mojolists/mojonator` (copy also in `Mojo Lister\Claude outputs\tools\` on the data PC) | device VM, from the Mojo Lister settings folder |
 
 ## Run order (≈8 tool calls per batch, any size)
-1. Prepare the job list (eBay item id, title, description, Doug's price, condition, media, eBay photo URLs — **front cover first**).
+1. Prepare the job list (eBay item id, **eBay SKU** (required — the runner appends ` - SKU` to the end of every Vinted title, since Vinted has no SKU field; rule from 2026-11-08, new listings only), title, description, Doug's price, condition, media, eBay photo URLs — **front cover first**).
 2. In the vinted.com tab: load the runner, then `MojoVintedRunner.start(jobs)` — returns at once; it lists one item per minute in the background.
 3. Wait (≈1 min per item), then read `MojoVintedRunner.status()` **once**.
 4. `MojoVintedRunner.dupCheck()` — duplicate active titles on the profile.

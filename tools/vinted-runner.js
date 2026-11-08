@@ -10,11 +10,13 @@
                      then end the eBay listings in ONE call:  python3 ebaytrade.py end <ids...>  (tools/ebaytrade.py)
                      then the pull sheet (by eBay SKU/crate).
 
-   job = { ebayItemId:'3667…', title:'…', description:'…', price:3, condition:'very good'|'good'|'new',
+   job = { ebayItemId:'3667…', sku:'GBA' (REQUIRED — his eBay SKU/crate), title:'…', description:'…', price:3, condition:'very good'|'good'|'new',
            media:'CD'|'DVD'|'Blu-ray'|'Cassette', catalogId:3039 (optional override), photos:['https://i.ebayimg.com/…'] }
    Rules baked in (Doug's standing rules for Vinted runs):
      - photos in the order given — put the FRONT cover first; every photo gets the auto-crop
      - Vinted has no "Like New" for used: like new / very good -> Very good (2); good -> Good (3); sealed/new -> New with tags (6)
+     - the eBay SKU is appended to the end of every title as " - SKU" (Vinted has no SKU field; he reads it
+       off the sale when printing the label). Rule from 2026-11-08, new listings only — existing ones untouched
      - package size Small (1); price as given (he sets it); at most one listing per minute (default 60 s)
      - results: localStorage '__vrun' {done:[{e,v,n}],errors:[…]} (read by the Mojonator Vinted Sync userscript)
        and '__mojo_vinted_log' [{vintedId, ebayItemId, title, price, listedAt}] — the sync links each new
@@ -88,6 +90,11 @@
     var cond = COND[String(job.condition || 'very good').toLowerCase()];
     if (!cond) return Promise.reject(new Error('unknown condition "' + job.condition + '"'));
     if (!job.photos || !job.photos.length) return Promise.reject(new Error('no photos'));
+    var sku = String(job.sku || '').trim();
+    if (!sku) return Promise.reject(new Error('no SKU — every Vinted title must end with its eBay SKU'));
+    var tail = ' - ' + sku, fullTitle = String(job.title).trim();
+    if (fullTitle.slice(-tail.length).toLowerCase() !== tail.toLowerCase()) fullTitle += tail;
+    job.title = fullTitle;
     var tu = uuid(), ids = [];
     return job.photos.reduce(function (p, u, i) { return p.then(function () { return uploadPhoto(u, i, tu).then(function (j) { ids.push(j.id); }); }); }, Promise.resolve())
       .then(function () {
