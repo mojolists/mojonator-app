@@ -1,0 +1,11 @@
+{
+  "mode": "watch",
+  "poll_minutes": 10,
+  "gmail": { "user": "mojolists.recycled@gmail.com", "app_password": "PASTE THE 16-CHARACTER APP PASSWORD" },
+  "ebay": { "client_id": "FROM MOJO LISTER settings.json", "client_secret": "FROM MOJO LISTER settings.json", "refresh_token": "FROM MOJO LISTER settings.json" },
+  "github": { "token": "THE MOJONATOR GITHUB TOKEN", "repo": "mojolists/mojonator" },
+  "ntfy_topic": "mojo-crosslist-9cb8e38e7781e05b",
+  "healthcheck_url": "https://hc-ping.com/YOUR-CHECK-ID",
+  "alert_email": "",
+  "port": 8765
+}

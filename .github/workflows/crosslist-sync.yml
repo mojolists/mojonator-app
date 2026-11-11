@@ -1,0 +1,40 @@
+name: Crosslist Sync - Windows build
+
+on:
+  push:
+    branches: [main]
+    paths: ['crosslist-sync/**', '.github/workflows/crosslist-sync.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: crosslist-sync
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m py_compile crosslist.py
+      - run: pip install pyinstaller
+      - run: pyinstaller --onefile --console --name crosslist-sync crosslist.py
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force pkg | Out-Null
+          Copy-Item dist\crosslist-sync.exe, config.example.json, vinted-hider.user.js, README.md pkg\
+          Copy-Item config.example.json pkg\config.json
+          '@echo off' , 'cd /d "%~dp0"', 'crosslist-sync.exe --test' | Set-Content pkg\Test-connections.bat
+          Compress-Archive -Path pkg\* -DestinationPath CrosslistSync-windows.zip -Force
+      - name: Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="crosslist-sync-build-${{ github.run_number }}"
+          gh release create "$TAG" CrosslistSync-windows.zip --repo "${{ github.repository }}" --title "Crosslist Sync build ${{ github.run_number }}" --notes "Windows build of the eBay/Vinted cross-list sync. Commit ${{ github.sha }}."
