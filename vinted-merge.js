@@ -18,7 +18,7 @@
        orders:[{txId,title,price,date,status}], runner:[{vintedId,ebayItemId,title,price,listedAt}] } */
 (function (root) {
   'use strict';
-  var VERSION = 'v3'; // v2: listing photo URLs (vintedPhotos); v3: multi-copy items (quantity) split one copy per Vinted listing
+  var VERSION = 'v4'; // v2: listing photo URLs (vintedPhotos); v3: multi-copy items (quantity) split one copy per Vinted listing; v4: cross-listed items (crossStatus, MOJO_SYNC_V7_CROSSLIST)
   var STOP = {}; 'cd cds dvd dvds blu ray bluray the of a an and with new like good very used disc discs edition lot in to for by on movie movies album'.split(' ').forEach(function (w) { STOP[w] = 1; });
 
   function toks(s) {
@@ -52,6 +52,9 @@
   function uid() { return Math.random().toString(36).slice(2, 9); }
   function normT(s) { return String(s || '').toLowerCase().replace(/\s+/g, ' ').trim(); }
   function isSold(it) { return it.status === 'sold' || it.status === 'shipped'; }
+  /* v4: a cross-listed item that sold on EBAY (the eBay sync turned its record into the eBay sale). Its Vinted
+     listing is only tracked from here on: the sale, price, status and channel are eBay's and are never touched. */
+  function ebaySold(it) { return isSold(it) && it.account !== 'V' && !!it.ebayOrderId; }
   function shippedStatus(s) { return /complet|deliver|shipped|on (its|the) way|in transit|received|sent to buyer/i.test(String(s || '')); }
 
   // Thresholds — tuned on Doug's data 2026-11-07 (see repo history).
@@ -166,7 +169,16 @@
         else { it = newPending(L, cands, d.why, now); items.push(it); rep.pending.push({ title: L.title, why: d.why }); }
         byVid[vid] = it; taken[it.id] = 1;
       }
-      var price = parseFloat(L.price); if (!isNaN(price)) { it.vintedPrice = price; it.askingPrice = price; }
+      var price = parseFloat(L.price);
+      if (ebaySold(it)) { // v4: sold on eBay — just follow what happened to the Vinted listing
+        if (!isNaN(price)) it.vintedPrice = price;
+        it.vintedLastSeen = day;
+        var vSold = L.closed && (L.closing === 'sold' || !L.closing);
+        it.vintedStatus = vSold ? 'sold' : (L.hidden ? 'hidden' : (L.reserved ? 'reserved' : 'active'));
+        it.crossStatus = vSold ? 'double-sale' : (L.hidden ? 'sold-ebay' : 'sold-ebay-pending-vinted-hide');
+        return;
+      }
+      if (!isNaN(price)) { it.vintedPrice = price; it.askingPrice = price; }
       if (L.url) it.vintedUrl = L.url;
       if (L.photos && L.photos.length) it.vintedPhotos = L.photos.slice(0, 20);
       if (!it.vintedListedDate) { it.vintedListedDate = L.listedAt || day; it.listedDate = it.vintedListedDate; }
@@ -190,6 +202,7 @@
           if (!it.saleDate) it.saleDate = day;
         }
         it.ebayFees = 0; it.shipCost = 0;
+        if (it.crossStatus === 'both' || (it.crossListedEbay && !it.crossStatus)) it.crossStatus = 'sold-vinted'; // v4
       } else {
         it.vintedStatus = L.hidden ? 'hidden' : (L.reserved ? 'reserved' : 'active');
         if (isSold(it) && !it.vintedTxId) it.status = 'listed'; // relisted/undone on Vinted
@@ -200,7 +213,9 @@
     // 3. Listings that disappeared from the profile (deleted on Vinted) -> back on hand.
     if (snap.complete) {
       items.forEach(function (it) {
-        if (!it.vintedId || wardrobe[it.vintedId] || isSold(it)) return;
+        if (!it.vintedId || wardrobe[it.vintedId]) return;
+        if (ebaySold(it)) { if (it.vintedStatus !== 'removed') { it.vintedStatus = 'removed'; if (it.crossStatus === 'sold-ebay-pending-vinted-hide') it.crossStatus = 'sold-ebay'; it.vUpdated = now; rep.removed++; } return; } // v4: its Vinted listing was deleted after the eBay sale
+        if (isSold(it)) return;
         if (it.vintedStatus === 'removed') return;
         it.vintedStatus = 'removed'; it.status = 'sourced'; it.vUpdated = now; rep.removed++;
       });

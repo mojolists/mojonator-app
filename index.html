@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mojonator — Reseller Insights</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="vinted-merge.js?v=135"></script><!-- MOJO_B132_VINTED -->
+<script src="vinted-merge.js?v=137"></script><!-- MOJO_B132_VINTED -->
 <style>
   :root{
     --green:#16a34a; --green-dark:#15803d; --green-light:#dcfce7; --green-soft:#f0fdf4;
@@ -112,6 +112,7 @@
   .acct-badge{font-size:10px;font-weight:700;padding:1px 7px;border-radius:5px;background:#eef2ff;color:#4338ca}
   .acct-B{background:#fef9c3;color:#854d0e}
   .acct-V{background:#ccfbf1;color:#0f766e} /* MOJO_B132_VINTED */
+  .xpill{display:inline-block;border-radius:20px;padding:1px 8px;font-size:10px;font-weight:700;background:#e0e7ff;color:#3730a3;margin-left:4px;white-space:nowrap} .xpill.warn{background:#fee2e2;color:#b91c1c} /* MOJO_B137_CROSSLIST */
   .vbtns{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}.vbtns .btn{padding:3px 10px;font-size:12px}
   #vPhotoBox{position:fixed;inset:0;background:rgba(15,23,42,.75);z-index:9999;display:none;align-items:flex-start;justify-content:center;overflow:auto;padding:30px 16px}
   #vPhotoBox .inner{background:#fff;border-radius:14px;max-width:1100px;width:100%;padding:16px 18px;box-shadow:0 20px 60px rgba(0,0,0,.4)}
@@ -216,7 +217,7 @@
       <a data-view="settings"><span class="ic">⚙</span> Settings</a>
       <a id="calcNav"><span class="ic">%</span> Price calc</a>
     </nav>
-    <div class="side-foot">Mojonator v1.0 (b136)<br><span id="syncFoot">Local · GitHub-sync ready</span></div>
+    <div class="side-foot">Mojonator v1.0 (b137)<br><span id="syncFoot">Local · GitHub-sync ready</span></div>
   </aside>
 
   <!-- Main -->
@@ -325,7 +326,10 @@ const EBAY_FIELDS = ['title','salePrice','saleDate','ebayFees','shipCost','statu
    app is not undone by an older copy in the repo. */
 const VINTED_FIELDS = ['account','marketplace','askingPrice','listedDate','status','salePrice','saleDate','ebayFees','shipCost','firstListed','firstListedSource',
   'vintedId','vintedUrl','vintedPrice','vintedListedDate','vintedStatus','vintedTxId','vintedOrderStatus','vintedLastSeen','vintedMatch','vintedCandidates','vintedNote','vintedCreated',
-  'prevAccount','prevAskingPrice','prevListedDate','vUpdated','vintedPhotos'];
+  'prevAccount','prevAskingPrice','prevListedDate','vUpdated','vintedPhotos',
+  'crossStatus','crossListedEbay','crossSoldAt','ebayStillLive']; /* MOJO_B137_CROSSLIST: live-on-both state travels with the Vinted state */
+/* MOJO_B137_CROSSLIST: what the eBay sync last saw of a cross-listed item's eBay listing — always taken from the repo */
+const CROSS_EBAY_FIELDS = ['ebayPrice','ebayListedDate','ebayQty'];
 const MANUAL_FIELDS = ['cost','source','location','category','purchaseDate','tags','custom','notes','consignPartner','consignSplit','itemId','sku','listedDate','refund','otherFees','autoRelist','firstListed'];
 function b64encode(s){ return btoa(unescape(encodeURIComponent(s))); }
 function b64decode(s){ return decodeURIComponent(escape(atob(s.replace(/\s/g,'')))); }
@@ -361,6 +365,7 @@ function clientMerge(incoming){ /* MOJO_V113_MERGEFIX */
          take the fresh price/listed date too, and carry the relist state. */
       if(!vSkip && inc.ebayItemId && m.ebayItemId && inc.ebayItemId!==m.ebayItemId){ m.askingPrice=inc.askingPrice; m.listedDate=inc.listedDate; }
       if(inc.relist) m.relist=inc.relist;
+      CROSS_EBAY_FIELDS.forEach(f=>{ if(Object.prototype.hasOwnProperty.call(inc,f)) m[f]=inc[f]; }); /* MOJO_B137_CROSSLIST */
       /* MOJO_B130_FIRSTLISTED: an original date the sync read from eBay beats a local estimate */
       if(inc.firstListed && inc.firstListedSource==='ebay' && m.firstListedSource!=='ebay'){ m.firstListed=inc.firstListed; m.firstListedSource='ebay'; }
       /* MOJO_B127_PRICE: eBay is the source of truth for the asking price — take the
@@ -702,7 +707,7 @@ function chartOpts(noLegend){ return {responsive:true,maintainAspectRatio:false,
 /* ---------------- Listed / Unlisted inventory ---------------- */
 function isUnsold(it){ return it.status!=='sold' && it.status!=='shipped' && it.status!=='returned' && it.status!=='bundled'; }
 function daysSince(d){ return d ? Math.max(0, daysBetween(d, todayISO())) : 0; }
-function invSearchMatch(it,q){ return !q || [it.sku,it.itemId,it.title,it.location,it.source,it.category,(it.tags||[]).join(' ')].join(' ').toLowerCase().includes(q); }
+function invSearchMatch(it,q){ return !q || [it.sku,it.itemId,it.title,it.location,it.source,it.category,(it.tags||[]).join(' '),it.ebayItemId,((it.relist&&it.relist.prevIds)||[]).join(' '),it.vintedId].join(' ').toLowerCase().includes(q); } /* MOJO_B137_CROSSLIST: current + earlier eBay numbers and the Vinted id are searchable */
 /* MOJO_B120_SEARCHFOCUS: re-rendering the view rebuilds the search input, which
    used to drop focus after every letter — refocus it with the caret at the end. */
 function invSearchWire(c,rerender){
@@ -738,7 +743,7 @@ function rowListed(it){
     <td class="selcell"><input type="checkbox" ${BULKSEL.has(it.id)?'checked':''} onclick="toggleSel('${it.id}',this.checked)"></td>
     <td class="tight cell-sku" title="${esc(it.sku||'')}"><strong>${esc(it.sku||'—')}</strong>${it.pendingSku!=null?(it.pendingSkuErr?` <span title="eBay label update FAILED: ${esc(it.pendingSkuErr)} — will retry next sync" style="color:var(--red)">⚠</span>`:' <span title="Label update queued — applies to eBay on the next sync after you Push" class="muted">⏳</span>'):''}</td>
     <td>${esc(it.itemId||'—')}</td>
-    <td class="cell-title" title="${esc(it.title||'')}">${esc(it.title||'')}${qtyBadge(it)}</td>
+    <td class="cell-title" title="${esc(it.title||'')}">${esc(it.title||'')}${qtyBadge(it)}${crossPill(it)}</td>
     <td><span class="acct-badge acct-${it.account}">${esc(acctName(it.account))}</span></td>
     <td class="num">${it.cost?money(num(it.cost)):'—'}</td>
     <td>${esc(it.source||'—')}</td>
@@ -1515,13 +1520,25 @@ function vintedBookmarklet(){
   const code=`(async()=>{try{const H={accept:'application/json'};const g=u=>fetch(u,{headers:H}).then(r=>{if(!r.ok)throw Error(u+' '+r.status);return r.json()});let w=[],p=1,tp=1;do{const j=await g('/api/v2/wardrobe/${mid}/items?page='+p+'&per_page=96&order=newest_first');(j.items||[]).forEach(o=>w.push({id:o.id,title:o.title,price:o.price&&o.price.amount,cond:o.status,closed:!!o.is_closed,reserved:!!o.is_reserved,hidden:!!o.is_hidden,closing:o.item_closing_action||'',url:o.url,photos:(o.photos||[]).map(p=>p.full_size_url||p.url).filter(Boolean)}));tp=(j.pagination||{}).total_pages||1;p++}while(p<=tp&&p<50);let o=[];try{let q=1,n;do{const j=await g('/api/v2/my_orders?type=sold&status=all&per_page=100&page='+q);n=(j.my_orders||[]);n.forEach(x=>o.push({txId:x.transaction_id,title:x.title,price:x.price&&x.price.amount,date:x.date,status:x.status}));q++}while(n.length>=100&&q<50)}catch(e){}let r=[];try{r=JSON.parse(localStorage.getItem('__mojo_vinted_log')||'[]')}catch(e){}const s={at:new Date().toISOString(),complete:true,memberId:'${mid}',wardrobe:w,orders:o,runner:r};location.href='https://mojolists.com/mojonator-app/#vimport='+encodeURIComponent(JSON.stringify(s))}catch(e){alert('Mojonator Vinted export failed: '+e.message+' (are you signed in to Vinted?)')}})()`;
   return 'javascript:'+encodeURIComponent(code);
 }
+/* MOJO_B137_CROSSLIST: one disc live on eBay AND Vinted is ONE item. crossStatus (set by the eBay sync / Vinted sync):
+   both · sold-ebay-pending-vinted-hide · sold-ebay · sold-vinted · double-sale. ebayStillLive = sold, but its eBay listing can still be bought. */
+const CROSS_LABEL={both:'eBay + Vinted','sold-ebay-pending-vinted-hide':'Sold on eBay — hide on Vinted','sold-ebay':'Sold on eBay','sold-vinted':'Sold on Vinted','double-sale':'SOLD ON BOTH'};
+function crossNeeds(it){ return it.crossStatus==='sold-ebay-pending-vinted-hide' || it.crossStatus==='double-sale' || it.ebayStillLive===true; }
+function crossPill(it){
+  if(it.ebayStillLive===true) return ' <span class="xpill warn" title="Sold, but its eBay listing is still live — end it on eBay">end on eBay</span>';
+  if(!it.crossStatus) return '';
+  return ` <span class="xpill${crossNeeds(it)?' warn':''}" title="Cross-listed item">${esc(CROSS_LABEL[it.crossStatus]||it.crossStatus)}</span>`;
+}
+function ebayLink(it,label){ return it.ebayItemId?`<a href="https://www.ebay.com/itm/${esc(it.ebayItemId)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${label||'eBay ↗'}</a>`:''; }
+function vFilter(q){ q=String(q||'').toLowerCase().trim(); document.querySelectorAll('#vLinkedBody tr').forEach(tr=>{ tr.style.display=(!q||(tr.getAttribute('data-q')||'').includes(q))?'':'none'; }); }
 function renderVinted(c){
   if(!window.MojoVinted){ c.innerHTML='<div class="panel"><div class="panel-body">vinted-merge.js did not load — reload the page.</div></div>'; return; }
   const V=DATA.items.filter(it=>it.account==='V'||it.vintedId);
   const pend=V.filter(it=>it.vintedMatch==='pending');
   const linked=V.filter(it=>it.vintedId && it.vintedMatch!=='pending');
   const active=linked.filter(it=>it.status==='listed');
-  const sold=V.filter(isSold);
+  const sold=V.filter(it=>isSold(it)&&it.account==='V'); /* MOJO_B137_CROSSLIST: a cross-listed item that sold on eBay is an eBay sale */
+  const both=V.filter(it=>it.crossStatus==='both'); const needs=DATA.items.filter(crossNeeds);
   const gross=sold.reduce((s,it)=>s+num(it.salePrice),0), net=sold.reduce((s,it)=>s+(netProfit(it)||0),0);
   const vs=DATA.vintedSync, rep=vs&&vs.report;
   const byId=new Map(DATA.items.map(it=>[it.id,it]));
@@ -1541,15 +1558,21 @@ function renderVinted(c){
       <td style="white-space:nowrap"><button class="btn" onclick="vLinkSel('${p.id}')" title="One ticked: link it. Several ticked: bundle them and link the bundle.">${sel.size>1?'Bundle '+sel.size+' &amp; link':'Link'}</button><br>
         <button class="btn ghost" style="margin-top:6px" onclick="vKeep('${p.id}')" title="Not in Mojonator — keep it as its own Vinted item">Keep as new</button></td></tr>`;
   }).join('');
-  const linkedRows=linked.slice().sort((a,b)=>String(b.vintedListedDate||'').localeCompare(String(a.vintedListedDate||''))).map(it=>`<tr>
-      <td>${it.vintedUrl?`<a href="${esc(it.vintedUrl)}" target="_blank" rel="noopener">${esc(it.title)}</a>`:esc(it.title)} <button class="btn ghost" style="padding:1px 7px;font-size:11px" onclick="vPhotos('${it.id}')" title="Photos">📷</button></td><td>${mediaPill(it)}</td>
+  const needRows=needs.map(it=>{
+    const what= it.crossStatus==='double-sale' ? 'Sold on eBay AND Vinted — cancel the Vinted sale' : it.crossStatus==='sold-ebay-pending-vinted-hide' ? 'Sold on eBay '+esc(it.saleDate||'')+' — hide or delete it on Vinted' : 'Sold on Vinted '+esc(it.saleDate||'')+' — end the eBay listing';
+    return `<tr><td style="white-space:normal"><strong>${esc(it.title||'')}</strong> <span class="muted">· ${esc(it.location||it.sku||'no location')}</span>
+      <div style="color:var(--red);margin:4px 0 8px">${what}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">${it.vintedUrl?`<a class="btn ghost" href="${esc(it.vintedUrl)}" target="_blank" rel="noopener">Open on Vinted ↗</a>`:''}${it.ebayItemId?`<a class="btn ghost" href="https://www.ebay.com/itm/${esc(it.ebayItemId)}" target="_blank" rel="noopener">Open on eBay ↗</a>`:''}</div></td></tr>`; }).join('');
+  const linkedRows=linked.slice().sort((a,b)=>String(b.vintedListedDate||'').localeCompare(String(a.vintedListedDate||''))).map(it=>`<tr data-q="${esc([it.title,it.location,it.sku,it.itemId,it.ebayItemId,it.vintedId,((it.relist&&it.relist.prevIds)||[]).join(' '),CROSS_LABEL[it.crossStatus]||''].join(' ').toLowerCase())}">
+      <td>${it.vintedUrl?`<a href="${esc(it.vintedUrl)}" target="_blank" rel="noopener">${esc(it.title)}</a>`:esc(it.title)}${crossPill(it)} <button class="btn ghost" style="padding:1px 7px;font-size:11px" onclick="vPhotos('${it.id}')" title="Photos">📷</button> ${it.crossStatus||it.ebayStillLive?ebayLink(it):''}</td><td>${mediaPill(it)}</td>
       <td>${esc(it.location||it.sku||'—')}</td><td class="num">${money(num(it.vintedPrice||it.askingPrice))}</td>
       <td>${esc(it.vintedListedDate||'—')}</td><td class="num">${isSold(it)?'—':vDays(it.vintedListedDate)}</td>
       <td><span class="status s-${esc(it.status)}">${esc(it.status)}</span> <span class="muted" style="font-size:11px">${esc(it.vintedStatus||'')}</span></td>
       <td class="muted" style="font-size:11px">${esc(it.vintedMatch||'')}</td>
       <td><button class="btn ghost" style="padding:2px 8px" onclick="vUnlink('${it.id}')" title="Wrong match — send it back to the confirm queue">Unlink</button></td></tr>`).join('');
   c.innerHTML=`
-  <div class="cards">${kpi('Active on Vinted',active.length,money(active.reduce((s,it)=>s+num(it.vintedPrice||it.askingPrice),0))+' asking')}${kpi('Sold on Vinted',sold.length,money(gross)+' gross')}${kpi('Net (all time)',money(net),'no seller fees · Vinted pays shipping')}${kpi('Needs confirmation',pend.length,'')}</div>
+  <div class="cards">${kpi('Active on Vinted',active.length,money(active.reduce((s,it)=>s+num(it.vintedPrice||it.askingPrice),0))+' asking')}${kpi('Sold on Vinted',sold.length,money(gross)+' gross')}${kpi('Net (all time)',money(net),'no seller fees · Vinted pays shipping')}${kpi('Needs confirmation',pend.length,'')}${kpi('On eBay too',both.length,needs.length?'<span style="color:var(--red)">'+needs.length+' need you</span>':'cross-listed, one copy')}</div>
+  ${needs.length?`<div class="panel" style="border-color:var(--red)"><div class="panel-head"><h2>Cross-listed — needs you (${needs.length})</h2></div><div class="tablewrap"><table><tbody>${needRows}</tbody></table></div></div>`:''}
   <div class="panel"><div class="panel-head"><h2>Sync</h2><div class="spacer"></div><span class="muted" style="font-size:12px" id="vPushStatus">${vs?'Last Vinted sync '+agoText(vs.at)+' ('+esc(vs.by||'')+')'+(rep?` · ${rep.listings} listings, ${rep.auto} auto-linked, ${rep.pending} to confirm, ${rep.newSales} new sales`:''):'No Vinted sync yet'}</span></div><div class="panel-body">
     ${imp?`<div class="note" style="border-color:#0f766e"><strong>Vinted export ready:</strong> ${imp.wardrobe.length} listings, ${imp.orders.length} sold orders${imp.runner&&imp.runner.length?', '+imp.runner.length+' listing-runner records':''} (read ${agoText(imp.at)}).
       <div style="margin-top:8px"><button class="btn" onclick="vApplyImport()">Apply to Mojonator</button> <button class="btn ghost" onclick="vPreviewImport()">Preview first</button> <button class="btn ghost" onclick="STATE.vimport=null;render()">Discard</button></div><div id="vPreview"></div></div>`:''}
@@ -1561,9 +1584,9 @@ function renderVinted(c){
     </ol></div></div>
   ${pend.length?`<div class="panel"><div class="panel-head"><h2>Needs confirmation (${pend.length})</h2><div class="spacer"></div><span class="muted" style="font-size:12px">tick the item you moved to Vinted · tick several to build a bundle</span></div>
     <div class="tablewrap"><table class="vq"><thead><tr><th>Vinted listing</th><th>Mojonator item</th><th></th></tr></thead><tbody>${pendRows}</tbody></table></div></div>`:''}
-  <div class="panel"><div class="panel-head"><h2>On Vinted (${linked.length})</h2></div>
+  <div class="panel"><div class="panel-head"><h2>On Vinted (${linked.length})</h2><div class="spacer"></div><input type="text" placeholder="Search title, location, eBay number…" style="max-width:280px" oninput="vFilter(this.value)"></div>
     <div class="tablewrap"><table><thead><tr><th>Title</th><th>Media</th><th>Location</th><th class="num">Price</th><th>Listed</th><th class="num">Days</th><th>Status</th><th>Matched by</th><th></th></tr></thead>
-    <tbody>${linkedRows||'<tr><td colspan="9" class="muted" style="text-align:center;padding:20px">Nothing linked yet.</td></tr>'}</tbody></table></div></div>`;
+    <tbody id="vLinkedBody">${linkedRows||'<tr><td colspan="9" class="muted" style="text-align:center;padding:20px">Nothing linked yet.</td></tr>'}</tbody></table></div></div>`;
 }
 function vToggle(pid,id,on){ const s=VSEL[pid]||(VSEL[pid]=new Set()); on?s.add(id):s.delete(id); render(); }
 function vSearch(pid,q){ const p=DATA.items.find(x=>x.id===pid); VSEARCH[pid]=MojoVinted.search(DATA.items,q,p&&p.title).map(it=>it.id); render(); }

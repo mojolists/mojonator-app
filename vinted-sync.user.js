@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         Mojonator Vinted Sync
 // @namespace    https://mojolists.com/mojonator-app/
-// @version      1.0.2
+// @version      1.0.3
 // @description  Reads your Vinted listings and sold orders and writes them into Mojonator's data.json (mojolists/mojonator) — Vinted channel.
 // @author       Mojolists
 // @match        https://www.vinted.com/*
-// @require      https://mojolists.com/mojonator-app/vinted-merge.js?v=135
+// @require      https://mojolists.com/mojonator-app/vinted-merge.js?v=137
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue

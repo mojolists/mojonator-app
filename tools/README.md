@@ -19,3 +19,13 @@ The low-token eBay → Vinted route, proven on the 2026-11-06/07 CD runs. Nothin
 Condition map: like new / very good → Very good (2) · good → Good (3) · sealed/new → New with tags (6). Package size Small (1).
 CD catalog id 3039. DVD/Blu-ray/cassette: run `MojoVintedRunner.captureCatalog()` and list ONE by hand through the form, then add the id to `CATALOG` in the runner.
 If Vinted shows a check page, the runner stops itself — clear it in the browser, then `MojoVintedRunner.resume()`.
+
+## Cross-listing (one disc live on eBay AND Vinted) — added 2026-11-11
+- To cross-list, run steps 1–4 above and **skip step 5** (do not end the eBay listing). The runner record links the
+  Vinted listing to the item; the next eBay sync sees the eBay listing still live and marks the item `crossStatus: both`.
+- One disc = one Mojonator record, whatever happens: `both` → `sold-vinted` (Vinted sale) or
+  `sold-ebay-pending-vinted-hide` → `sold-ebay` (eBay sale, then hidden/deleted on Vinted). `double-sale` = sold on both.
+- Singles only. Never cross-list a disc that is inside a bundle, or two listings with the same title.
+- Hide/unhide a Vinted listing: `PUT /api/v2/items/{id}/is_hidden` with `{"is_hidden":true|false}` and the same
+  headers the runner uses (X-CSRF-Token, X-Anon-Id). Verified 2026-11-09.
+- The original first-listed date is never changed by a relist, a cross-list or a sale.
