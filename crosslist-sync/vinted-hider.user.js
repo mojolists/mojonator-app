@@ -1,12 +1,14 @@
 // ==UserScript==
 // @name         Mojo Crosslist - Vinted hider
 // @namespace    https://mojolists.com/
-// @version      0.1.0
+// @version      0.1.1
 // @description  Hides a Vinted listing when the Crosslist Sync program on this PC says its twin sold on eBay.
 // @match        https://www.vinted.com/*
 // @grant        GM_xmlhttpRequest
 // @connect      127.0.0.1
 // @run-at       document-idle
+// @updateURL    https://raw.githubusercontent.com/mojolists/mojonator-app/main/crosslist-sync/vinted-hider.user.js
+// @downloadURL  https://raw.githubusercontent.com/mojolists/mojonator-app/main/crosslist-sync/vinted-hider.user.js
 // ==/UserScript==
 /* Runs only in the top window of a signed-in vinted.com tab. Every 3 minutes it asks the local program
    (http://127.0.0.1:8765) for listings to hide, hides each with Vinted's own request
@@ -29,6 +31,16 @@
   }
   function csrf() { var m = document.documentElement.outerHTML.match(/CSRF_TOKEN\\?"[:,]\\?"([0-9a-f-]{36})/); return m ? m[1] : ''; }
   function anon() { var m = document.cookie.match(/anon_id=([^;]+)/); return m ? m[1] : ''; }
+  function hdrs() { return { 'Accept': 'application/json', 'Content-Type': 'application/json', 'X-CSRF-Token': csrf(), 'X-Anon-Id': anon() }; }
+  /* 0.1.1: a tab left open for hours has an expired Vinted login pass, and Vinted answers 401. Ask Vinted for a new
+     pass (the same request the site itself makes) and try once more. If that fails the account is really signed out. */
+  async function vfetch(url, opt) {
+    var r = await fetch(url, opt);
+    if (r.status !== 401) return r;
+    var f = await fetch('/web/api/auth/refresh', { method: 'POST', headers: hdrs() });
+    if (!f.ok) throw new Error('signed out of Vinted (login refresh ' + f.status + ') - sign in again in this Chrome');
+    return fetch(url, opt);
+  }
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
   function haveLock() {
     try {
@@ -39,7 +51,7 @@
   }
   async function isHidden(id) {
     for (var p = 1; p < 12; p++) {
-      var r = await fetch('/api/v2/wardrobe/' + MEMBER + '/items?page=' + p + '&per_page=96&order=newest_first', { headers: { accept: 'application/json' } });
+      var r = await vfetch('/api/v2/wardrobe/' + MEMBER + '/items?page=' + p + '&per_page=96&order=newest_first', { headers: { accept: 'application/json' } });
       if (!r.ok) throw new Error('wardrobe ' + r.status);
       var j = await r.json(), items = j.items || [];
       for (var i = 0; i < items.length; i++) if (String(items[i].id) === String(id)) return items[i].is_hidden ? 'hidden' : (items[i].is_closed ? 'closed' : 'visible');
@@ -49,8 +61,7 @@
   }
   async function hide(id) {
     var token = csrf(); if (!token) throw new Error('not signed in to Vinted (no page token)');
-    var r = await fetch('/api/v2/items/' + id + '/is_hidden', { method: 'PUT',
-      headers: { 'Accept': 'application/json', 'Content-Type': 'application/json', 'X-CSRF-Token': token, 'X-Anon-Id': anon() },
+    var r = await vfetch('/api/v2/items/' + id + '/is_hidden', { method: 'PUT', headers: hdrs(),
       body: JSON.stringify({ is_hidden: true }) });
     if (r.status === 403 || r.status === 429) throw new Error('Vinted refused (' + r.status + ') - possible check page');
     if (!r.ok && r.status !== 404) throw new Error('hide HTTP ' + r.status);
