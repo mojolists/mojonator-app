@@ -21,7 +21,7 @@ import urllib.error, urllib.parse, urllib.request
 from email.message import EmailMessage
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = '0.2.0'
+VERSION = '0.2.1'
 BASE = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__))
 CONFIG_FILE = os.path.join(BASE, 'config.json')
 STATE_FILE = os.path.join(BASE, 'state.json')
@@ -43,6 +43,8 @@ DEFAULT_CONFIG = {
     'role': 'main',                        # 'main' = acts at once.  'backup' = second PC: re-checks each sale later, acts only if still needed.
     'backup_delay_minutes': 20,
     'pc_name': '',                         # shown in alerts; blank = 'X51' for main, 'backup PC' for backup
+    'backup_healthcheck_url': '',          # backup role pings this one, never healthcheck_url
+    'backup_pc_name': 'data PC',
 }
 
 PHOTO_RE = re.compile(r'images\d*\.vinted\.net/t[a-z]*/(\d+_[0-9a-fA-F]+_[A-Za-z0-9]+)/')
@@ -646,6 +648,11 @@ def main():
     if cfg is None:
         save_json(CONFIG_FILE, DEFAULT_CONFIG)
         print('Created %s - fill it in, then start again.' % CONFIG_FILE); input('Press Enter to close.'); return 1
+    if '--backup' in sys.argv: cfg['role'] = 'backup'   # Start-backup.bat: the main PC's config.json can be copied as it is
+    if '--live' in sys.argv: cfg['mode'] = 'live'
+    if cfg.get('role') == 'backup':
+        cfg['healthcheck_url'] = cfg.get('backup_healthcheck_url') or ''  # never ping the main PC's watchdog: a dead main PC must not look alive
+        cfg['pc_name'] = cfg.get('backup_pc_name') or (cfg.get('pc_name') if cfg.get('pc_name') not in ('', 'X51') else 'backup PC')
     if '--test' in sys.argv:
         ok = self_test(cfg)
         if getattr(sys, 'frozen', False): input('\nPress Enter to close.')

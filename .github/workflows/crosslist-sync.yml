@@ -30,6 +30,7 @@ jobs:
           Copy-Item dist\crosslist-sync.exe, config.example.json, vinted-hider.user.js, README.md pkg\
           Copy-Item config.example.json pkg\config.json
           '@echo off' , 'cd /d "%~dp0"', 'crosslist-sync.exe --test' | Set-Content pkg\Test-connections.bat
+          '@echo off' , 'cd /d "%~dp0"', 'title Crosslist BACKUP - leave this open', 'crosslist-sync.exe --backup --live' | Set-Content pkg\Start-backup.bat
           Compress-Archive -Path pkg\* -DestinationPath CrosslistSync-windows.zip -Force
       - name: Release
         shell: bash

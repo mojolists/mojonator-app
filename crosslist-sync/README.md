@@ -39,3 +39,7 @@ Then it checks the real listing: if the eBay quantity is already 0, or the Vinte
 and says nothing. If the listing is still for sale it does the job itself and sends a `BACKUP ...` alert, which means the main PC
 missed one and needs a look. It needs the same Tampermonkey script in a signed-in Vinted tab in Chrome on the backup PC.
 Alerts the main PC already sent are not repeated (it reads the ntfy channel to check).
+
+Easiest set-up: copy the main PC's `config.json` unchanged and start the program with `Start-backup.bat`
+(`crosslist-sync.exe --backup --live`). In the backup role the program ignores `healthcheck_url` and pings only
+`backup_healthcheck_url` (blank by default).
