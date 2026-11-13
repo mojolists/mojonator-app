@@ -105,4 +105,48 @@ s = make('watch')
 def boom(since): raise RuntimeError('eBay down')
 s.ebay.orders_since = boom; assert not s.cycle() and not sent; assert not s.cycle() and len(sent) == 1 and 'eBay orders' in sent[0][0]
 print('edge cases ok')
+
+# ---- backup role (second PC)
+phone = set()
+X.Alerts.recent_titles = lambda self, hours=12: set(phone)
+def makeb():
+    b = make('live'); b.cfg['role'] = 'backup'; b.cfg['backup_delay_minutes'] = 20; b.state['browser_seen'] = time.time(); return b
+def age(b, mins):
+    for k in b.state.get('first_seen', {}): b.state['first_seen'][k] -= mins * 60
+codeB = X.PHOTO_RE.search(B['vintedPhotos'][0]).group(1)
+# Vinted sale, main PC did its job (eBay already at 0): backup waits, then does nothing and says nothing
+b = makeb(); b.mail.raws = [vinted_mail('<b1@v>', B['title'], codeB)]; b.cycle()
+assert not b.ebay.zeroed and not sent and not b.state['sold'], 'backup must wait'
+b.ebay.items[str(B['ebayItemId'])] = {'id': str(B['ebayItemId']), 'status': 'Active', 'available': 0, 'title': ''}
+age(b, 21); b.state['browser_seen'] = time.time(); b.cycle(); assert not b.ebay.zeroed and not sent, sent
+# Vinted sale, main PC did nothing: backup zeroes eBay after the delay and alerts
+b = makeb(); b.mail.raws = [vinted_mail('<b2@v>', B['title'], codeB)]; b.cycle(); age(b, 10); b.cycle(); assert not b.ebay.zeroed
+age(b, 11); b.state['browser_seen'] = time.time(); b.cycle()
+assert b.ebay.zeroed == [str(B['ebayItemId'])] and len(sent) == 1 and sent[0][0].startswith('BACKUP took it off eBay'), sent
+b.cycle(); assert len(sent) == 1 and len(b.ebay.zeroed) == 1
+# eBay sale: nothing queued until the delay passes, then queued for the browser to check
+b = makeb(); b.ebay.orders = X.parse_orders(ORDERS_XML % A['ebayItemId']); b.cycle(); assert not b.state['queue']
+age(b, 21); b.state['browser_seen'] = time.time(); b.cycle(); assert [q['vintedId'] for q in b.state['queue']] == [str(A['vintedId'])] and not sent
+# ... and a hide the browser has not confirmed does not raise the per-item alert on the backup
+b.state['queue'][0]['queued'] -= 40 * 60; b.check_queue(); assert not sent, sent
+# browser replies through the local endpoint: already hidden -> quiet; had to hide -> BACKUP alert
+import threading, urllib.request
+from http.server import ThreadingHTTPServer
+def post(b, body):
+    srv = ThreadingHTTPServer(('127.0.0.1', 0), X.make_handler(b)); threading.Thread(target=srv.handle_request, daemon=True).start()
+    r = urllib.request.Request('http://127.0.0.1:%d/done' % srv.server_address[1], data=json.dumps(body).encode(), headers={'Content-Type': 'application/json'})
+    urllib.request.urlopen(r, timeout=5).read(); srv.server_close()
+post(b, {'vintedId': str(A['vintedId']), 'ok': True, 'acted': False, 'detail': 'hidden'})
+assert b.state['queue'][0]['done'] and not sent, sent
+b = makeb(); b.ebay.orders = X.parse_orders(ORDERS_XML % A['ebayItemId']); b.cycle(); age(b, 21); b.cycle()
+post(b, {'vintedId': str(A['vintedId']), 'ok': True, 'acted': True, 'detail': 'hidden'})
+assert len(sent) == 1 and sent[0][0].startswith('BACKUP hid it on Vinted'), sent
+# unknown Vinted listing: backup stays quiet when the main PC already alerted, speaks up when it did not
+b = makeb(); b.mail.raws = [vinted_mail('<b4@v>', 'Some brand new listing', '01_00abc_ZZZZZZZZZZZZZZZZZZZZZZZZ')]
+phone.add('Check Vinted sale: Some brand new listing'); b.cycle(); age(b, 21); b.cycle(); assert not sent, sent
+phone.clear(); b = makeb(); b.mail.raws = [vinted_mail('<b5@v>', 'Some brand new listing', '01_00abc_ZZZZZZZZZZZZZZZZZZZZZZZZ')]; b.cycle(); age(b, 21); b.cycle()
+assert len(sent) == 1 and sent[0][0].startswith('Check Vinted sale'), sent
+# main role is unchanged by all this: acts at once
+s = make('live'); s.state['browser_seen'] = time.time(); s.mail.raws = [vinted_mail('<b6@v>', B['title'], codeB)]; s.cycle(); assert s.ebay.zeroed == [str(B['ebayItemId'])] and not sent
+print('backup role ok')
 print('ALL PASS')

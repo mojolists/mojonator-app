@@ -7,5 +7,8 @@
   "ntfy_topic": "mojo-crosslist-9cb8e38e7781e05b",
   "healthcheck_url": "https://hc-ping.com/YOUR-CHECK-ID",
   "alert_email": "",
-  "port": 8765
+  "port": 8765,
+  "role": "main",
+  "backup_delay_minutes": 20,
+  "pc_name": ""
 }

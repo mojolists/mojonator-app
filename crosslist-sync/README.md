@@ -28,3 +28,14 @@ alerts when the pings stop or a cycle fails.
 - Writing Vinted sales into Mojonator (Mojonator still learns of them through its own Vinted sync).
 
 Tests: `python tests/test_crosslist.py path/to/data.json`
+
+## Backup PC (0.2.0)
+
+A second copy can run on another always-on PC with `"role": "backup"` in its `config.json` (plus `"mode": "live"`, a `pc_name`
+for alert wording, and its OWN `healthcheck_url` or a blank one - never the main PC's, or a dead main PC would look alive).
+
+The backup watches the same eBay orders and Vinted sale emails, but leaves each sale alone for `backup_delay_minutes` (20).
+Then it checks the real listing: if the eBay quantity is already 0, or the Vinted listing is already hidden/gone, it does nothing
+and says nothing. If the listing is still for sale it does the job itself and sends a `BACKUP ...` alert, which means the main PC
+missed one and needs a look. It needs the same Tampermonkey script in a signed-in Vinted tab in Chrome on the backup PC.
+Alerts the main PC already sent are not repeated (it reads the ntfy channel to check).

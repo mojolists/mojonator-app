@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mojo Crosslist - Vinted hider
 // @namespace    https://mojolists.com/
-// @version      0.1.1
+// @version      0.2.0
 // @description  Hides a Vinted listing when the Crosslist Sync program on this PC says its twin sold on eBay.
 // @match        https://www.vinted.com/*
 // @grant        GM_xmlhttpRequest
@@ -61,13 +61,15 @@
   }
   async function hide(id) {
     var token = csrf(); if (!token) throw new Error('not signed in to Vinted (no page token)');
+    var before = await isHidden(id); // 0.2.0: look first - the other PC (or Doug) may already have dealt with it
+    if (before !== 'visible') return { st: before, acted: false };
     var r = await vfetch('/api/v2/items/' + id + '/is_hidden', { method: 'PUT', headers: hdrs(),
       body: JSON.stringify({ is_hidden: true }) });
     if (r.status === 403 || r.status === 429) throw new Error('Vinted refused (' + r.status + ') - possible check page');
     if (!r.ok && r.status !== 404) throw new Error('hide HTTP ' + r.status);
     var st = await isHidden(id);
     if (st === 'visible') throw new Error('still visible after hide');
-    return st; // hidden | closed (sold on Vinted) | gone (deleted)
+    return { st: st, acted: true }; // hidden | closed (sold on Vinted) | gone (deleted)
   }
   async function tick() {
     if (!haveLock()) return;
@@ -76,7 +78,7 @@
     var list = (q && q.queue) || [];
     for (var i = 0; i < list.length; i++) {
       var it = list[i];
-      try { var st = await hide(it.vintedId); await local('POST', '/done', { vintedId: it.vintedId, ok: st !== 'closed', detail: st === 'closed' ? 'already SOLD on Vinted' : st }); }
+      try { var h = await hide(it.vintedId), st = h.st; await local('POST', '/done', { vintedId: it.vintedId, ok: st !== 'closed', acted: h.acted, detail: st === 'closed' ? 'already SOLD on Vinted' : st }); }
       catch (e) { try { await local('POST', '/done', { vintedId: it.vintedId, ok: false, detail: String(e.message || e) }); } catch (e2) {} break; } // stop on the first failure
       await sleep(20000 + Math.random() * 20000); // unhurried, like a person
     }

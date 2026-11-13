@@ -9,6 +9,9 @@ Every few minutes it:
      quantity 0, or queues a Vinted "hide" for the browser helper (vinted-hider.user.js)
   5. pings the outside watchdog (healthchecks.io)
 
+A second copy can run on another PC with "role": "backup".  The backup looks at every sale again
+backup_delay_minutes later, checks the real listing, and acts only if the main PC has not.
+
 Python standard library only.  Settings: config.json beside the program.
   crosslist-sync            run the service
   crosslist-sync --test     check every connection once, replay the last 7 days, change nothing
@@ -18,7 +21,7 @@ import urllib.error, urllib.parse, urllib.request
 from email.message import EmailMessage
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = '0.1.0'
+VERSION = '0.2.0'
 BASE = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__))
 CONFIG_FILE = os.path.join(BASE, 'config.json')
 STATE_FILE = os.path.join(BASE, 'state.json')
@@ -37,6 +40,9 @@ DEFAULT_CONFIG = {
     'alert_email': '',                     # optional second alert channel (sent through the Gmail account above)
     'port': 8765,
     'hide_alert_minutes': 30,
+    'role': 'main',                        # 'main' = acts at once.  'backup' = second PC: re-checks each sale later, acts only if still needed.
+    'backup_delay_minutes': 20,
+    'pc_name': '',                         # shown in alerts; blank = 'X51' for main, 'backup PC' for backup
 }
 
 PHOTO_RE = re.compile(r'images\d*\.vinted\.net/t[a-z]*/(\d+_[0-9a-fA-F]+_[A-Za-z0-9]+)/')
@@ -132,6 +138,21 @@ class Alerts:
         return ok
 
 
+    def recent_titles(self, hours=12):
+        """Titles already sent to the phone channel (by any PC) in the last hours.  None = could not tell."""
+        topic = self.cfg.get('ntfy_topic')
+        if not topic: return None
+        try:
+            st, hd, raw = http('https://ntfy.sh/%s/json?poll=1&since=%dh' % (topic, hours), timeout=20)
+            out = set()
+            for line in raw.decode('utf-8', 'replace').splitlines():
+                try: out.add(json.loads(line).get('title') or '')
+                except Exception: pass
+            return out
+        except Exception as e:
+            log('could not read the alert channel: %s' % e); return None
+
+
 # ---------------------------------------------------------------- Mojonator links (data.json)
 class Links:
     """Which eBay item number / Vinted photo belongs to which Mojonator record."""
@@ -164,7 +185,7 @@ class Links:
             if not it.get('vintedId'): continue
             if it.get('status') == 'bundled': continue
             n += 1
-            rec = {'id': it.get('id'), 'title': it.get('title') or '', 'location': it.get('location') or it.get('sku') or '',
+            rec = {'id': it.get('id'), 'title': html.unescape(it.get('title') or ''), 'location': it.get('location') or it.get('sku') or '',
                    'ebayItemId': str(it.get('ebayItemId') or ''), 'vintedId': str(it.get('vintedId')),
                    'vintedUrl': it.get('vintedUrl') or ('https://www.vinted.com/items/' + str(it.get('vintedId'))),
                    'vintedStatus': it.get('vintedStatus') or '', 'crossStatus': it.get('crossStatus') or '',
@@ -349,6 +370,16 @@ class Service:
         self.report = []; self.started = now()
 
     live = property(lambda self: self.cfg.get('mode') == 'live' and not self.dry)
+    backup = property(lambda self: self.cfg.get('role') == 'backup')
+    pc = property(lambda self: self.cfg.get('pc_name') or ('backup PC' if self.backup else 'X51'))
+
+    def too_fresh(self, key):
+        """Backup only: a sale is left alone until backup_delay_minutes after this PC first saw it, so the main PC goes first."""
+        if not self.backup or self.dry: return False
+        seen = self.state.setdefault('first_seen', {})
+        seen.setdefault(key, now())
+        if now() - seen[key] < float(self.cfg.get('backup_delay_minutes', 20)) * 60: return True
+        seen.pop(key, None); return False
 
     def save(self):
         if self.dry: return
@@ -368,6 +399,10 @@ class Service:
 
     def tell(self, title, body, click=None, key=None, high=False):
         if self.dry: self.note('  (alert it would send) %s - %s' % (title, body)); return
+        if self.backup and not title.startswith('BACKUP'):
+            got = self.alerts.recent_titles()
+            if got is not None and title in got:  # the main PC already told Doug exactly this
+                log('alert not repeated (already sent by the main PC): %s' % title); return
         self.alerts.send(title, body, click=click, key=key, high=high)
 
     # ---- an item sold on one site
@@ -387,7 +422,7 @@ class Service:
             self.note('  eBay sale: "%s" - Vinted listing already %s, nothing to do' % (rec['title'][:60], rec['vintedStatus'])); return
         if self.live:
             with lock:
-                self.state['queue'].append({'vintedId': rec['vintedId'], 'title': rec['title'], 'url': rec['vintedUrl'], 'location': rec['location'], 'queued': now(), 'done': False, 'alerted': False})
+                self.state['queue'].append({'vintedId': rec['vintedId'], 'title': rec['title'], 'url': rec['vintedUrl'], 'location': rec['location'], 'queued': now(), 'done': False, 'alerted': False, 'ebayId': rec['ebayItemId']})
             self.note('  eBay sale: "%s" -> queued Vinted hide (%s)' % (rec['title'][:60], rec['vintedId']))
             self.act('hide-vinted', rec, rec['ebayItemId'], 'queued')
         else:
@@ -404,13 +439,15 @@ class Service:
                       click='https://www.ebay.com/itm/' + rec['ebayItemId'], key='chk:' + rec['id'], high=True); return
         link = 'https://www.ebay.com/itm/' + st['id']
         if st['available'] < 1:
-            self.note('  Vinted sale: "%s" - eBay listing %s not for sale (%s), nothing to do' % (rec['title'][:60], st['id'], st['status'])); return
+            self.note('  Vinted sale: "%s" - eBay listing %s not for sale (%s), nothing to do%s' % (rec['title'][:60], st['id'], st['status'], ' (the main PC or you already handled it)' if self.backup else '')); return
         if self.live:
             try:
                 res = self.ebay.zero(st['id']); after = self.ebay.item_state(st['id'], follow=0)
                 if after['available'] > 0: raise RuntimeError('still shows %d available' % after['available'])
                 self.note('  Vinted sale: "%s" -> eBay %s: %s (checked)' % (rec['title'][:60], st['id'], res))
                 self.act('zero-ebay', rec, st['id'], res)
+                if self.backup:
+                    self.tell('BACKUP took it off eBay: ' + rec['title'][:50], 'Sold on Vinted. The X51 had not taken it off eBay after %d min, so the %s did (%s). Check the X51.' % (float(self.cfg.get('backup_delay_minutes', 20)), self.pc, res), click=link, key='bzero:' + rec['id'], high=True)
             except Exception as e:
                 self.act('zero-ebay', rec, st['id'], 'FAILED ' + str(e)[:150])
                 self.tell('End on eBay: ' + rec['title'][:60], 'Sold on Vinted. Taking it off eBay FAILED (%s). End the eBay listing yourself.' % str(e)[:120], click=link, key='zero:' + rec['id'], high=True)
@@ -429,10 +466,13 @@ class Service:
             for iid, title in lines:
                 key = oid + ':' + iid
                 if key in self.state['orders']: continue
+                if not baseline and self.too_fresh('o:' + key): continue
                 self.state['orders'][key] = now(); new += 1
                 if baseline: continue
                 recs = self.links.for_ebay_item(iid)
-                if not recs: continue  # not a cross-listed item
+                if not recs:
+                    if not self.dry: log('eBay order %s: %s (item %s) - not cross-listed, nothing to do' % (oid, title[:60], iid))
+                    continue
                 if len(recs) > 1:
                     self.tell('Check sale: ' + title[:60], 'eBay order %s matches %d Mojonator records. Check Vinted by hand.' % (oid, len(recs)), key='amb:' + key, high=True); continue
                 self.note('eBay order %s (%s): %s' % (oid, created[:16], title[:70]))
@@ -448,6 +488,7 @@ class Service:
             except Exception as e:
                 self.tell('Vinted email unreadable', 'A Vinted email could not be read (%s). Check your Vinted sales.' % str(e)[:100], key='mailparse', high=True); continue
             if m['id'] in self.state['emails']: continue
+            if not baseline and m['sold'] and self.too_fresh('m:' + m['id']): continue
             self.state['emails'][m['id']] = now(); new += 1
             if baseline or not m['sold']: continue
             name = (m['titles'][0] if m['titles'] else m['subject'])[:70]
@@ -474,14 +515,16 @@ class Service:
         mins = float(self.cfg.get('hide_alert_minutes', 30))
         with lock:
             for q in self.state['queue']:
-                if q['done'] or q.get('alerted'): continue
+                if q['done'] or q.get('alerted') or self.backup: continue  # backup: the 'browser not answering' alert below covers it
                 if now() - q['queued'] > mins * 60:
                     q['alerted'] = True
                     self.alerts.send('Hide on Vinted: ' + q['title'][:60], 'Sold on eBay. The automatic hide has not happened in %d min. Hide or delete it on Vinted. Location %s.' % (mins, q.get('location') or '?'), click=q['url'], high=True)
             self.state['queue'] = [q for q in self.state['queue'] if not (q['done'] and now() - q['queued'] > 7 * 86400)]
         seen = self.state.get('browser_seen', 0)
         if self.live and now() - seen > 20 * 60 and now() - self.started > 20 * 60:  # 20 min grace after start-up
-            self.alerts.send('Vinted browser is not answering', 'The Chrome helper on the X51 has not checked in for %s. Open Chrome on vinted.com and make sure you are signed in.' % ('over 20 minutes' if seen else 'yet (never seen)'), key='browser', high=True)
+            waiting = len([q for q in self.state['queue'] if not q['done']])
+            self.alerts.send('Vinted browser on the %s is not answering' % self.pc, 'The Chrome helper on the %s has not checked in for %s. Open Chrome there on vinted.com and make sure you are signed in.%s' % (self.pc, 'over 20 minutes' if seen else 'yet (never seen)', (' %d Vinted listing(s) are waiting to be checked.' % waiting) if waiting else ''),
+                             key='browser', high=not self.backup or bool(waiting), repeat_hours=24 if self.backup and not waiting else 6)
 
     def cycle(self):
         ok = True; first = not self.state.get('baselined')
@@ -499,7 +542,7 @@ class Service:
                 log('%s FAILED: %s' % (name, e)); log(traceback.format_exc(limit=3))
                 fails = self.state.setdefault('fails', {}); fails[name] = fails.get(name, 0) + 1
                 if fails[name] >= 2:  # one blip is retried quietly; two in a row is an alert
-                    self.alerts.send('Crosslist sync problem: ' + name, '%s failed twice in a row: %s' % (name, str(e)[:200]), key='fail:' + name, high=True)
+                    self.alerts.send('Crosslist sync problem on the %s: %s' % (self.pc, name), '%s failed twice in a row: %s' % (name, str(e)[:200]), key='fail:' + name, high=True)
                 if name == 'Mojonator links' and not self.links.count: break
         if ok and first:
             self.state['baselined'] = iso()
@@ -539,7 +582,7 @@ def make_handler(svc):
             elif self.path.startswith('/status'):
                 with lock:
                     s = svc.state
-                    self._send(200, {'version': VERSION, 'mode': svc.cfg.get('mode'), 'last_cycle': iso(s.get('last_cycle')) if s.get('last_cycle') else None,
+                    self._send(200, {'version': VERSION, 'mode': svc.cfg.get('mode'), 'role': 'backup' if svc.backup else 'main', 'last_cycle': iso(s.get('last_cycle')) if s.get('last_cycle') else None,
                                      'last_ok': s.get('last_ok'), 'linked_records': svc.links.count, 'pending_hides': len([x for x in s['queue'] if not x['done']]),
                                      'browser_seen': iso(s['browser_seen']) if s.get('browser_seen') else None})
             else: self._send(404, {'error': 'not found'})
@@ -549,14 +592,16 @@ def make_handler(svc):
             if self.path.startswith('/done'):
                 try: body = json.loads(self.rfile.read(int(self.headers.get('Content-Length') or 0)) or b'{}')
                 except Exception: body = {}
-                vid = str(body.get('vintedId') or ''); good = bool(body.get('ok'))
+                vid = str(body.get('vintedId') or ''); good = bool(body.get('ok')); acted = body.get('acted', True)
                 with lock:
                     svc.state['browser_seen'] = now()
                     for x in svc.state['queue']:
                         if x['vintedId'] == vid and not x['done']:
                             if good: x['done'] = True
-                            log('Vinted hide %s: %s %s' % (vid, 'confirmed hidden' if good else 'FAILED', body.get('detail') or ''))
-                            record_action('hide-vinted', x['title'], '', vid, 'hidden (checked)' if good else 'FAILED ' + str(body.get('detail') or '')[:150])
+                            log('Vinted hide %s: %s %s' % (vid, ('confirmed hidden' if acted else 'was already off sale, nothing to do -') if good else 'FAILED', body.get('detail') or ''))
+                            record_action('hide-vinted', x['title'], x.get('ebayId', ''), vid, ('hidden (checked)' if acted else 'already off sale') if good else 'FAILED ' + str(body.get('detail') or '')[:150])
+                            if good and acted and svc.backup:
+                                svc.alerts.send('BACKUP hid it on Vinted: ' + x['title'][:50], 'Sold on eBay. The X51 had not hidden it on Vinted, so the %s did. Check the X51.' % svc.pc, click=x['url'], high=True)
                             if not good and not x.get('alerted'):
                                 x['alerted'] = True
                                 svc.alerts.send('Hide on Vinted: ' + x['title'][:60], 'Sold on eBay. The automatic hide failed (%s). Hide or delete it on Vinted.' % str(body.get('detail') or '')[:100], click=x['url'], high=True)
@@ -586,7 +631,7 @@ def self_test(cfg):
         n, new = svc.check_mail(days=7); return '%d Vinted sale email(s) in the last 7 days' % n
     step('Gmail (Vinted sale emails)', mail_replay)
     if cfg.get('ntfy_topic'):
-        step('Phone alert', lambda: ('sent - check your phone' if Alerts(cfg, {}).send('Crosslist sync test', 'Connection test from the X51.') else 'NOT sent'))
+        step('Phone alert', lambda: ('sent - check your phone' if Alerts(cfg, {}).send('Crosslist sync test', 'Connection test from the %s.' % svc.pc) else 'NOT sent'))
     if cfg.get('healthcheck_url'):
         step('Watchdog ping', lambda: (http(cfg['healthcheck_url'], timeout=20), 'pinged')[1])
     print('\nReplay of the last 7 days (what it would have done):')
@@ -610,7 +655,7 @@ def main():
     except OSError:
         print('Crosslist sync is already running (port %s in use).' % cfg.get('port')); time.sleep(5); return 1
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    log('Mojo Crosslist Sync %s started - mode %s, every %s min' % (VERSION, cfg.get('mode'), cfg.get('poll_minutes')))
+    log('Mojo Crosslist Sync %s started - mode %s, role %s, every %s min' % (VERSION, cfg.get('mode'), 'BACKUP (acts %s min after a sale, only if the main PC has not)' % cfg.get('backup_delay_minutes') if svc.backup else 'main', cfg.get('poll_minutes')))
     if cfg.get('mode') != 'live': log('WATCH-ONLY: nothing on eBay or Vinted will be changed')
     while True:
         try: svc.cycle()
