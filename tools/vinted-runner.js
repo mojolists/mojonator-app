@@ -10,6 +10,8 @@
                      then end the eBay listings in ONE call:  python3 ebaytrade.py end <ids...>  (tools/ebaytrade.py)
                      then the pull sheet (by eBay SKU/crate).
 
+   EVERY job must also carry  ebayQty: <eBay available quantity, must be >= 1>  and  photosChecked: true
+   (main photo viewed and it matches the title) — start() refuses the whole run otherwise. See tools/README.md step 0.
    job = { ebayItemId:'3667…', sku:'GBA' (REQUIRED — his eBay SKU/crate), title:'…', description:'…', price:3, condition:'very good'|'good'|'new',
            media:'CD'|'DVD'|'Blu-ray'|'Cassette', catalogId:3039 (optional override), photos:['https://i.ebayimg.com/…'] }
    Rules baked in (Doug's standing rules for Vinted runs):
@@ -128,11 +130,19 @@
   }
 
   var api = {
-    version: 'v1',
+    version: 'v2',
     /* Start a run. Jobs already done in the current __vrun are skipped, so calling start() again with the
        same list resumes. Pass {fresh:true} to begin a new run (the old __vrun is kept under __vrun_prev). */
     start: function (jobs, opts) {
       opts = opts || {};
+      /* GUARD (2026-11-14, after an MC Hammer cassette that had already sold on eBay was listed here and sold again):
+         nothing is listed unless every job proves (1) eBay still has a copy to sell and (2) its photos were looked at.
+         ebayQty      = eBay's "Available quantity" for the listing, read at pick time (Mojonator item.quantity or
+                        Seller Hub). An out-of-stock listing stays in the Active list at 0 - "active" is NOT stock.
+         photosChecked = true only after the main photo was viewed and matches the title (artist + album). */
+      var bad = (jobs || []).filter(function (j) { return !(Number(j.ebayQty) >= 1) || j.photosChecked !== true || !j.ebayItemId; })
+        .map(function (j) { return (j.ebayItemId || '?') + ' ' + String(j.title || '').slice(0, 40) + (!(Number(j.ebayQty) >= 1) ? ' [ebayQty missing or 0 - sold out?]' : '') + (j.photosChecked !== true ? ' [photos not checked]' : ''); });
+      if (bad.length) return { refused: true, reason: 'Run not started. Fix or drop these jobs first:', jobs: bad };
       var st = load(RUN_KEY, null);
       if (opts.fresh || !st || st.finished || !Array.isArray(st.jobs)) { if (st) saveK(RUN_KEY + '_prev', st); st = { started: new Date().toISOString(), jobs: [], done: [], errors: [] }; }
       var have = {}; st.jobs.forEach(function (j) { have[j.ebayItemId] = 1; });

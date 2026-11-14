@@ -9,7 +9,16 @@ The low-token eBay → Vinted route, proven on the 2026-11-06/07 CD runs. Nothin
 | 3. End on eBay | `tools/ebaytrade.py` in the **private** repo `mojolists/mojonator` (copy also in `Mojo Lister\Claude outputs\tools\` on the data PC) | device VM, from the Mojo Lister settings folder |
 
 ## Run order (≈8 tool calls per batch, any size)
-1. Prepare the job list (eBay item id, **eBay SKU** (required — the runner appends ` - SKU` to the end of every Vinted title, since Vinted has no SKU field; rule from 2026-11-08, new listings only), title, description, Doug's price, condition, media, eBay photo URLs — **front cover first**).
+0. **Pick only stock that still exists — and look at it (added 2026-11-14).** On 2026-11-13 an MC Hammer cassette that had
+   sold on eBay four days earlier was listed on Vinted and sold again, and a Fastway tape went up with another band's
+   photos. Both checks are now mandatory and the runner refuses a run without them:
+   - **Stock:** an eBay listing being *active* proves nothing — with out-of-stock control a sold-out listing stays in the
+     Active list at quantity 0. Pick with `tools/vinted-pick.js` in the Mojonator tab (`MojoVintedPick({match:/cassette/i,maxPrice:4.99,count:10})`),
+     which only returns records with eBay available quantity ≥ 1 and no sale on them, and put that number in each job as `ebayQty`.
+     If picking by hand, read "Available quantity" in Seller Hub for every item.
+   - **Photos:** download the main photo of every job and look at it; the artist and album on the case must match the title.
+     Only then set `photosChecked: true`. A mismatch is reported to Doug, not listed.
+1. Prepare the job list (`ebayQty` and `photosChecked: true` from step 0, eBay item id, **eBay SKU** (required — the runner appends ` - SKU` to the end of every Vinted title, since Vinted has no SKU field; rule from 2026-11-08, new listings only), title, description, Doug's price, condition, media, eBay photo URLs — **front cover first**).
 2. In the vinted.com tab: load the runner, then `MojoVintedRunner.start(jobs)` — returns at once; it lists one item per minute in the background.
 3. Wait (≈1 min per item), then read `MojoVintedRunner.status()` **once**.
 4. `MojoVintedRunner.dupCheck()` — duplicate active titles on the profile.
