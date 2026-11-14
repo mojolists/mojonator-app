@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mojo Crosslist - Vinted hider
 // @namespace    https://mojolists.com/
-// @version      0.2.0
+// @version      0.2.1
 // @description  Hides a Vinted listing when the Crosslist Sync program on this PC says its twin sold on eBay.
 // @match        https://www.vinted.com/*
 // @grant        GM_xmlhttpRequest
@@ -23,6 +23,7 @@
 
   function local(method, path, body) {
     return new Promise(function (res, rej) {
+      setTimeout(function () { rej(new Error('program did not answer')); }, 25000); // a stale tab may never get an answer at all
       GM_xmlhttpRequest({ method: method, url: BASE + path, data: body ? JSON.stringify(body) : undefined,
         headers: { 'Content-Type': 'application/json' }, timeout: 15000,
         onload: function (r) { try { res(JSON.parse(r.responseText)); } catch (e) { rej(e); } },
@@ -71,10 +72,30 @@
     if (st === 'visible') throw new Error('still visible after hide');
     return { st: st, acted: true }; // hidden | closed (sold on Vinted) | gone (deleted)
   }
+  /* 0.2.1: a tab left open for a long time can stop talking to the program (the page goes stale, or Chrome or
+     Tampermonkey updates under it) and only a refresh fixed it. So the tab now refreshes itself: every ~30 minutes,
+     or sooner if it cannot reach the program twice in a row. Never while a hide is running, never while Doug is
+     using the tab (mouse/keys in the last 10 minutes on a visible tab), never on a listing form. */
+  var loaded = Date.now(), lastInput = 0, busy = false, misses = 0, holder = false, RELOAD_EVERY = (28 + Math.random() * 6) * 60 * 1000;
+  ['mousedown', 'keydown', 'wheel', 'touchstart'].forEach(function (ev) { window.addEventListener(ev, function () { lastInput = Date.now(); }, { passive: true, capture: true }); });
+  async function maybeReload() {
+    if (busy || !holder) return; // only the one tab doing the work refreshes itself
+    var age = Date.now() - loaded;
+    if (!(age > RELOAD_EVERY || (misses >= 2 && age > 12 * 60 * 1000))) return;
+    if (/\/items\/(new|\d+\/edit)|\/inbox|\/checkout/.test(location.pathname)) return;
+    if (!document.hidden && Date.now() - lastInput < 10 * 60 * 1000) return;
+    try { var r = await fetch('/api/v2/wardrobe/' + MEMBER + '/items?page=1&per_page=1', { headers: { accept: 'application/json' } }); if (r.status >= 500) return; }
+    catch (e) { return; } // Vinted or the internet is down right now: a refresh would land on an error page, so wait
+    location.reload();
+  }
   async function tick() {
-    if (!haveLock()) return;
+    try { await tick2(); } finally { busy = false; maybeReload(); }
+  }
+  async function tick2() {
+    holder = haveLock(); if (!holder) return;
     var q;
-    try { q = await local('GET', '/queue'); } catch (e) { return; } // program not running: nothing to do
+    try { q = await local('GET', '/queue'); misses = 0; } catch (e) { misses++; return; } // program not reachable
+    busy = true;
     var list = (q && q.queue) || [];
     for (var i = 0; i < list.length; i++) {
       var it = list[i];
