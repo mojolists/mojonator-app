@@ -16,7 +16,7 @@
            media:'CD'|'DVD'|'Blu-ray'|'Cassette', catalogId:3039 (optional override), photos:['https://i.ebayimg.com/…'] }
    Rules baked in (Doug's standing rules for Vinted runs):
      - photos in the order given — put the FRONT cover first; every photo gets the auto-crop
-     - Vinted has no "Like New" for used: like new / very good -> Very good (2); good -> Good (3); sealed/new -> New with tags (6)
+     - conditions (Doug 2026-11-14): like new -> New without tags (1); very good -> Very good (2); good -> Good (3); sealed/new -> New with tags (6)
      - the eBay SKU is appended to the end of every title as " - SKU" (Vinted has no SKU field; he reads it
        off the sale when printing the label). Rule from 2026-11-08, new listings only — existing ones untouched
      - package size Small (1); price as given (he sets it); at most one listing per minute (default 60 s)
@@ -33,7 +33,7 @@
 (function () {
   'use strict';
   var CATALOG = { CD: 3039 };            // DVD / Blu-ray / Cassette: capture once with captureCatalog(), then add here
-  var COND = { 'new': 6, 'new with tags': 6, 'sealed': 6, 'like new': 2, 'very good': 2, 'good': 3 };
+  var COND = { 'new': 6, 'new with tags': 6, 'sealed': 6, 'new without tags': 1, 'like new': 1, 'very good': 2, 'good': 3 };  // 1 = New without tags (Doug 2026-11-14: Like New -> NWOT)
   var PACE_MS = 60000;
   var RUN_KEY = '__vrun', LOG_KEY = '__mojo_vinted_log', CAP_KEY = '__vcap';
   var timer = null;

@@ -44,6 +44,7 @@ Drafts with Mojo Lister's **Vinted** box checked never go in the eBay file. Uplo
 Picture Services and writes a `vinted-*.json` job file (copy in `Mojo Lister\data\exports\`). Doug says when to list.
 - Jobs carry `vintedOnly: true` + `draftId` — no eBay listing, so no ebayQty check and nothing to end on eBay.
 - Price is exactly what Doug typed (no floor, no $4.99 math).
+- Conditions: Like New -> New without tags, Very Good -> Very good, Good -> Good, Brand New -> New with tags, Acceptable -> flagged.
 - Before `start()`: view each main photo against the title, check edition/UPC against the case photo, fill any
   `needs` (missing SKU, DVD/Blu-ray catalogId, Acceptable grade), then set `photosChecked: true` per job.
 - Descriptions: title + UPC + tracklist — NO case line (he swaps broken cases).
