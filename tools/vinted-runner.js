@@ -23,7 +23,13 @@
      - results: localStorage '__vrun' {done:[{e,v,n}],errors:[…]} (read by the Mojonator Vinted Sync userscript)
        and '__mojo_vinted_log' [{vintedId, ebayItemId, title, price, listedAt}] — the sync links each new
        listing to its Mojonator item by eBay item number within a minute (decision 4: written at list time).
-   Description style he accepted: eBay title as first line + UPC + tracklist + "Original case with front and back inserts." */
+   Description style he accepted: eBay title as first line + UPC + tracklist + "Original case with front and back inserts."
+   v3 VINTED-ONLY jobs (Mojo Lister 0.8.22 "Vinted" checkbox, exported by Upload All as a vinted-*.json job file):
+     { vintedOnly:true, draftId:'d-…', sku, title, description, price (exact, as Doug typed), condition, media, catalogId, upc, photos, photosChecked }
+     No eBay listing exists, so ebayItemId/ebayQty are not required and nothing is ended on eBay. photosChecked stays
+     false in the file — set it true per job only after the main photo is checked against the title. DVD/Blu-ray jobs
+     arrive with catalogId null. These descriptions carry NO case line (Doug swaps broken cases). Results also go to
+     localStorage '__mojo_vinted_only_log' [{vintedId, draftId, sku, upc, title, price, listedAt}]. */
 (function () {
   'use strict';
   var CATALOG = { CD: 3039 };            // DVD / Blu-ray / Cassette: capture once with captureCatalog(), then add here
@@ -112,25 +118,30 @@
   function step() {
     var st = load(RUN_KEY, null); if (!st || st.stopped || st.finished || !Array.isArray(st.jobs)) return;
     var doneIds = {}; (st.done || []).forEach(function (d) { doneIds[d.e] = 1; }); (st.errors || []).forEach(function (d) { doneIds[d.e] = 1; });
-    var job = (st.jobs || []).filter(function (j) { return !doneIds[j.ebayItemId]; })[0];
+    var job = (st.jobs || []).filter(function (j) { return !doneIds[jobKey(j)]; })[0];
     if (!job) { st.finished = new Date().toISOString(); st.current = null; saveK(RUN_KEY, st); return; }
-    st.current = job.ebayItemId; st.heartbeat = new Date().toISOString(); saveK(RUN_KEY, st);
+    st.current = jobKey(job); st.heartbeat = new Date().toISOString(); saveK(RUN_KEY, st);
     listOne(job).then(function (res) {
-      var s2 = load(RUN_KEY, st); s2.done = s2.done || []; s2.done.push({ e: job.ebayItemId, v: res.id, n: res.n }); s2.current = null; saveK(RUN_KEY, s2);
-      var lg = load(LOG_KEY, []); lg.push({ vintedId: String(res.id), ebayItemId: String(job.ebayItemId), title: job.title, price: Number(job.price), listedAt: new Date().toISOString() }); saveK(LOG_KEY, lg);
+      var s2 = load(RUN_KEY, st); s2.done = s2.done || []; s2.done.push({ e: jobKey(job), v: res.id, n: res.n }); s2.current = null; saveK(RUN_KEY, s2);
+      if (job.vintedOnly) { var vl = load('__mojo_vinted_only_log', []); vl.push({ vintedId: String(res.id), draftId: String(job.draftId), sku: job.sku, upc: job.upc || '', title: job.title, price: Number(job.price), listedAt: new Date().toISOString() }); saveK('__mojo_vinted_only_log', vl); }
+      else { var lg = load(LOG_KEY, []); lg.push({ vintedId: String(res.id), ebayItemId: String(job.ebayItemId), title: job.title, price: Number(job.price), listedAt: new Date().toISOString() }); saveK(LOG_KEY, lg); }
       timer = setTimeout(step, PACE_MS);
     }).catch(function (e) {
       var s2 = load(RUN_KEY, st); s2.errors = s2.errors || []; s2.current = null;
       var fatal = /check page|not JSON|401|403|429/.test(e.message);
-      s2.errors.push({ e: job.ebayItemId, title: job.title, msg: e.message, fatal: fatal });
+      s2.errors.push({ e: jobKey(job), title: job.title, msg: e.message, fatal: fatal });
       if (fatal) { s2.stopped = 'stopped on: ' + e.message + ' — clear Vinted\'s check, then MojoVintedRunner.resume()'; s2.errors.pop(); s2.lastError = e.message; }
       saveK(RUN_KEY, s2);
       if (!fatal) timer = setTimeout(step, PACE_MS);
     });
   }
 
+  /* v3 (2026-11-14): Vinted-only items from Mojo Lister's Vinted checkbox have no eBay listing.
+     They carry vintedOnly:true + draftId instead of ebayItemId/ebayQty; the photo check still applies. */
+  function jobKey(j) { return j.ebayItemId ? String(j.ebayItemId) : (j.vintedOnly && j.draftId ? 'draft:' + j.draftId : ''); }
+
   var api = {
-    version: 'v2',
+    version: 'v3',
     /* Start a run. Jobs already done in the current __vrun are skipped, so calling start() again with the
        same list resumes. Pass {fresh:true} to begin a new run (the old __vrun is kept under __vrun_prev). */
     start: function (jobs, opts) {
@@ -140,13 +151,14 @@
          ebayQty      = eBay's "Available quantity" for the listing, read at pick time (Mojonator item.quantity or
                         Seller Hub). An out-of-stock listing stays in the Active list at 0 - "active" is NOT stock.
          photosChecked = true only after the main photo was viewed and matches the title (artist + album). */
-      var bad = (jobs || []).filter(function (j) { return !(Number(j.ebayQty) >= 1) || j.photosChecked !== true || !j.ebayItemId; })
-        .map(function (j) { return (j.ebayItemId || '?') + ' ' + String(j.title || '').slice(0, 40) + (!(Number(j.ebayQty) >= 1) ? ' [ebayQty missing or 0 - sold out?]' : '') + (j.photosChecked !== true ? ' [photos not checked]' : ''); });
+      var okStock = function (j) { return j.vintedOnly ? Boolean(j.draftId) : (Number(j.ebayQty) >= 1 && Boolean(j.ebayItemId)); };
+      var bad = (jobs || []).filter(function (j) { return !okStock(j) || j.photosChecked !== true; })
+        .map(function (j) { return (jobKey(j) || '?') + ' ' + String(j.title || '').slice(0, 40) + (!okStock(j) ? (j.vintedOnly ? ' [vintedOnly job missing draftId]' : ' [ebayQty missing or 0 - sold out?]') : '') + (j.photosChecked !== true ? ' [photos not checked]' : ''); });
       if (bad.length) return { refused: true, reason: 'Run not started. Fix or drop these jobs first:', jobs: bad };
       var st = load(RUN_KEY, null);
       if (opts.fresh || !st || st.finished || !Array.isArray(st.jobs)) { if (st) saveK(RUN_KEY + '_prev', st); st = { started: new Date().toISOString(), jobs: [], done: [], errors: [] }; }
-      var have = {}; st.jobs.forEach(function (j) { have[j.ebayItemId] = 1; });
-      (jobs || []).forEach(function (j) { if (!have[j.ebayItemId]) st.jobs.push(j); });
+      var have = {}; st.jobs.forEach(function (j) { have[jobKey(j)] = 1; });
+      (jobs || []).forEach(function (j) { if (!have[jobKey(j)]) st.jobs.push(j); });
       delete st.stopped; delete st.finished; saveK(RUN_KEY, st);
       clearTimeout(timer); step();
       return { queued: st.jobs.length, done: st.done.length, etaMin: Math.max(0, st.jobs.length - st.done.length - st.errors.length) * PACE_MS / 60000 };

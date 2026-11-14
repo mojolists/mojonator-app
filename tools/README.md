@@ -38,3 +38,14 @@ If Vinted shows a check page, the runner stops itself — clear it in the browse
 - Hide/unhide a Vinted listing: `PUT /api/v2/items/{id}/is_hidden` with `{"is_hidden":true|false}` and the same
   headers the runner uses (X-CSRF-Token, X-Anon-Id). Verified 2026-11-09.
 - The original first-listed date is never changed by a relist, a cross-list or a sale.
+
+## Vinted-only items (Mojo Lister 0.8.22, 2026-11-14)
+Drafts with Mojo Lister's **Vinted** box checked never go in the eBay file. Upload All hosts their photos on eBay
+Picture Services and writes a `vinted-*.json` job file (copy in `Mojo Lister\data\exports\`). Doug says when to list.
+- Jobs carry `vintedOnly: true` + `draftId` — no eBay listing, so no ebayQty check and nothing to end on eBay.
+- Price is exactly what Doug typed (no floor, no $4.99 math).
+- Before `start()`: view each main photo against the title, check edition/UPC against the case photo, fill any
+  `needs` (missing SKU, DVD/Blu-ray catalogId, Acceptable grade), then set `photosChecked: true` per job.
+- Descriptions: title + UPC + tracklist — NO case line (he swaps broken cases).
+- The eBay HTML description is saved in `Mojo Lister\data\ebay-description-library.json` (keyed by UPC) for a later identical item.
+- After the run: `dupCheck()`; results also in localStorage `__mojo_vinted_only_log`.
