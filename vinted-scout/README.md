@@ -10,6 +10,14 @@ On-demand Vinted bargain scan for media resellers. Tap **Scan** and the app:
 
 Nothing is bought, offered or messaged. Every card has **Open on Vinted** and **eBay sold** buttons.
 
+## Mojo Comps (price check one listing)
+Android: on any eBay or Vinted listing tap **Share → Mojo Comps** (or tap the price-check icon on the home screen and paste a link / eBay item number). The app:
+
+1. Opens the listing (follows ebay.us short links) and reads the page plus the seller description.
+2. Asks Claude for the cost (price/current bid + shipping), every title in the lot, an exact eBay Sold search per title, and red flags (hate/NSBM media eBay bans, bootleg signs, DVD/CD lots, full screen, unnamed contents).
+3. Pulls eBay **Sold Items** for each title (same edition/format/condition, buyer total incl. shipping, newest-sales trend).
+4. Shows a per-item breakdown, total current selling level, a rough net after fees (13.6% + $0.40) and the $4.39 label, per-item landed cost against the under-$1/disc lot target, and a verdict (money maker = est. net ≥ 2× cost and ≥ $15 over it). A stop flag skips comps.
+
 ## Builds
 GitHub Actions builds a Windows installer + portable zip and an Android APK on every push to `main`, attached to a release named `build-N`.
 

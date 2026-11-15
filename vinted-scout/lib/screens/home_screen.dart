@@ -1,9 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
+import '../comps/share_bridge.dart';
 
 import '../models.dart';
 import '../scanner.dart';
 import '../settings.dart';
+import 'comps_screen.dart';
 import 'history_screen.dart';
 import 'result_card.dart';
 import 'settings_screen.dart';
@@ -25,11 +30,28 @@ class _HomeScreenState extends State<HomeScreen> {
   final _logCtl = ScrollController();
   bool _showLog = true;
   bool _showRejected = false;
+  StreamSubscription<String>? _shareSub;
 
   @override
   void initState() {
     super.initState();
+    ShareBridge.init();
+    _shareSub = ShareBridge.shares.listen(_openComps);
     _load();
+  }
+
+  @override
+  void dispose() {
+    _shareSub?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _openComps([String? text]) async {
+    final s = _settings ?? await _store.load();
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => CompsScreen(settings: s, initialText: text)),
+    );
   }
 
   Future<void> _load() async {
@@ -42,6 +64,11 @@ class _HomeScreenState extends State<HomeScreen> {
     });
     if (!s.hasKey) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _openSettings());
+      return;
+    }
+    final shared = await ShareBridge.takeInitial();
+    if (shared != null && mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _openComps(shared));
     }
   }
 
@@ -129,6 +156,11 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('Vinted Scout'),
         actions: [
+          IconButton(
+            tooltip: 'Price check a listing (Mojo Comps)',
+            icon: const Icon(Icons.price_check),
+            onPressed: () => _openComps(),
+          ),
           IconButton(
             tooltip: 'History of reported items',
             icon: const Icon(Icons.history),

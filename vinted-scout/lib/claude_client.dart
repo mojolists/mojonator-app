@@ -52,6 +52,11 @@ class ClaudeClient {
     return buf.toString();
   }
 
+  /// Public entry points for other features (Comps).
+  Future<String> ask(String system, String user, {int maxTokens = 4000}) =>
+      _ask(system, user, maxTokens: maxTokens);
+  static Map<String, dynamic> extractJson(String text) => _extractJson(text);
+
   static Map<String, dynamic> _extractJson(String text) {
     var s = text.trim();
     final fence = RegExp(r'```(?:json)?\s*([\s\S]*?)```').firstMatch(s);

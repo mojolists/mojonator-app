@@ -16,6 +16,9 @@ class WebFetchException implements Exception {
 /// that bot-check plain HTTP clients (eBay) accept this.
 class WebFetcher {
   static WebViewEnvironment? _env;
+
+  /// The URL the last [pageText] call ended up on (after redirects).
+  String? lastUrl;
   static Future<void>? _envInit;
 
   /// On Windows, WebView2 must be given a writable user-data folder; the
@@ -70,6 +73,7 @@ class WebFetcher {
         transparentBackground: true,
       ),
       onLoadStop: (controller, uri) {
+        if (uri != null) lastUrl = uri.toString();
         if (!loaded.isCompleted) loaded.complete();
       },
       onReceivedError: (controller, request, error) {
