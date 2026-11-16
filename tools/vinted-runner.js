@@ -15,7 +15,7 @@
    job = { ebayItemId:'3667…', sku:'GBA' (REQUIRED — his eBay SKU/crate), title:'…', description:'…', price:3, condition:'very good'|'good'|'new',
            media:'CD'|'DVD'|'Blu-ray'|'Cassette', catalogId:3039 (optional override), photos:['https://i.ebayimg.com/…'] }
    Rules baked in (Doug's standing rules for Vinted runs):
-     - photos in the order given — put the FRONT cover first; every photo gets the auto-crop
+     - photos in the order given — put the FRONT cover first; every photo is padded to a 3:4 portrait frame (never trimmed)
      - conditions (Doug 2026-11-14): like new -> New without tags (1); very good -> Very good (2); good -> Good (3); sealed/new -> New with tags (6)
      - the eBay SKU is appended to the end of every title as " - SKU" (Vinted has no SKU field; he reads it
        off the sale when printing the label). Rule from 2026-11-08, new listings only — existing ones untouched
@@ -50,35 +50,16 @@
     return h;
   }
 
-  /* ---- auto-crop: strip the eBay backdrop. Edge map (Sobel) on a 400 px copy, keep the box that holds the
-     real edge mass (rows/cols with >=2% edge pixels), +1% margin; keep the original if the box is under 25%
-     of the frame (same rule as the Canny/contour crop used on the 2026-11-06 runs). */
+  /* ---- photo framing (2026-11-16): NO trimming. Doug's photos are already framed; the old backdrop crop
+     made them wide and Vinted's tall (3:4) tiles then chopped the sides off the case. Each photo is now
+     padded with white top/bottom (or sides) to a 3:4 portrait frame so the whole case shows. */
   function cropBlob(blob) {
     return createImageBitmap(blob).then(function (bmp) {
-      var W = bmp.width, H = bmp.height, s = Math.min(1, 400 / Math.max(W, H)), w = Math.max(8, Math.round(W * s)), h = Math.max(8, Math.round(H * s));
-      var c = document.createElement('canvas'); c.width = w; c.height = h; var x = c.getContext('2d'); x.drawImage(bmp, 0, 0, w, h);
-      var d = x.getImageData(0, 0, w, h).data, g = new Float32Array(w * h);
-      for (var i = 0; i < w * h; i++) g[i] = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2];
-      var rows = new Uint32Array(h), cols = new Uint32Array(w), TH = 90;
-      for (var yy = 1; yy < h - 1; yy++) for (var xx = 1; xx < w - 1; xx++) {
-        var p = yy * w + xx;
-        var gx = g[p - w + 1] + 2 * g[p + 1] + g[p + w + 1] - g[p - w - 1] - 2 * g[p - 1] - g[p + w - 1];
-        var gy = g[p + w - 1] + 2 * g[p + w] + g[p + w + 1] - g[p - w - 1] - 2 * g[p - w] - g[p - w + 1];
-        if (Math.abs(gx) + Math.abs(gy) > TH) { rows[yy]++; cols[xx]++; }
-      }
-      var rMin = Math.max(2, w * 0.02), cMin = Math.max(2, h * 0.02), t = 0, b = h - 1, l = 0, r = w - 1;
-      while (t < h && rows[t] < rMin) t++; while (b > t && rows[b] < rMin) b--;
-      while (l < w && cols[l] < cMin) l++; while (r > l && cols[r] < cMin) r--;
-      var box = { keep: true, W: W, H: H };
-      if (t < b && l < r && (b - t) * (r - l) >= 0.25 * w * h) {
-        var mx = Math.round(w * 0.01), my = Math.round(h * 0.01);
-        t = Math.max(0, t - my); b = Math.min(h - 1, b + my); l = Math.max(0, l - mx); r = Math.min(w - 1, r + mx);
-        box = { keep: false, x: Math.round(l / s), y: Math.round(t / s), w: Math.round((r - l + 1) / s), h: Math.round((b - t + 1) / s), W: W, H: H };
-      }
-      if (box.keep) return { blob: blob, box: box };
-      var o = document.createElement('canvas'); o.width = Math.min(box.w, W - box.x); o.height = Math.min(box.h, H - box.y);
-      o.getContext('2d').drawImage(bmp, box.x, box.y, o.width, o.height, 0, 0, o.width, o.height);
-      return new Promise(function (res) { o.toBlob(function (bb) { res({ blob: bb || blob, box: box }); }, 'image/jpeg', 0.92); });
+      var W = bmp.width, H = bmp.height, TW = W, TH = Math.round(W * 4 / 3);
+      if (H > TH) { TH = H; TW = Math.max(W, Math.round(H * 3 / 4)); }
+      var o = document.createElement('canvas'); o.width = TW; o.height = TH; var x = o.getContext('2d');
+      x.fillStyle = '#ffffff'; x.fillRect(0, 0, TW, TH); x.drawImage(bmp, Math.round((TW - W) / 2), Math.round((TH - H) / 2));
+      return new Promise(function (res) { o.toBlob(function (bb) { res({ blob: bb || blob, box: { pad: true, W: W, H: H, TW: TW, TH: TH } }); }, 'image/jpeg', 0.92); });
     });
   }
   function bigEbay(u) { return String(u).replace(/s-l\d+(\.\w+)$/, 's-l1600$1').replace(/\$_\d+\.(jpe?g|png|webp)/i, '$$_57.$1'); } // $_1 is a 400 px thumbnail; $_57 is full size
@@ -141,7 +122,7 @@
   function jobKey(j) { return j.ebayItemId ? String(j.ebayItemId) : (j.vintedOnly && j.draftId ? 'draft:' + j.draftId : ''); }
 
   var api = {
-    version: 'v3',
+    version: 'v4',
     /* Start a run. Jobs already done in the current __vrun are skipped, so calling start() again with the
        same list resumes. Pass {fresh:true} to begin a new run (the old __vrun is kept under __vrun_prev). */
     start: function (jobs, opts) {
