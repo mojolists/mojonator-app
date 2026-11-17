@@ -26,9 +26,12 @@ class EbayClient {
       '_sop': '13', // ended recently
       '_ipg': '60',
     };
-    // 1000 = New, 3000 = Used. Leave unfiltered for "any".
+    // 1000 = New. Media categories (DVD, Blu-ray, CD, cassette) grade used
+    // copies as Like New 2750 / Very Good 4000 / Good 5000 / Acceptable 6000,
+    // so filtering on plain 3000 ("Used") alone returns almost nothing there.
+    // Ask for every used grade. Leave unfiltered for "any".
     if (compCondition == 'sealed') qp['LH_ItemCondition'] = '1000';
-    if (compCondition == 'used') qp['LH_ItemCondition'] = '3000';
+    if (compCondition == 'used') qp['LH_ItemCondition'] = '3000|2750|4000|5000|6000';
     return Uri.https('www.ebay.com', '/sch/i.html', qp);
   }
 
