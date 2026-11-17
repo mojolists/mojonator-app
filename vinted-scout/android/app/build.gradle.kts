@@ -29,11 +29,20 @@ android {
         versionName = flutter.versionName
     }
 
+    // One fixed key for every build, so each new APK installs over the last
+    // one (a fresh debug key per CI run made Android refuse updates).
+    signingConfigs {
+        create("fixed") {
+            storeFile = file("vintedscout.jks")
+            storePassword = "vintedscout"
+            keyAlias = "vintedscout"
+            keyPassword = "vintedscout"
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("fixed")
         }
     }
 }

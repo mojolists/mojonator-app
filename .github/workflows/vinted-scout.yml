@@ -90,7 +90,7 @@ jobs:
           name: Vinted Scout build ${{ github.run_number }}
           body: |
             Windows: run the `VintedScout-Setup-*.exe` installer (or unzip the portable zip and run `vinted_scout.exe`).
-            Android: install `VintedScout-android.apk` (allow installs from unknown sources; it is signed with a debug key, so each new build installs over the last one).
+            Android: install `VintedScout-android.apk` (allow installs from unknown sources; every build is signed with the same key, so each new build installs over the last one).
             First launch: open Settings and paste your Anthropic API key.
           files: |
             dist/windows/VintedScout-windows-portable.zip
