@@ -161,7 +161,7 @@ For each title:
 Return ONLY JSON, no prose:
 {"title":"<listing title>","summary":"<one line: what is for sale>","price":<number or null>,"shipping":<number or null>,"auction":true|false,"auction_note":"<bids and time left, or empty>","condition":"<as listed>","seller":"<name and feedback if shown>","items":[{"name":"","format":"","edition":"","ebay_query":"","comp_condition":"sealed|used"}],"unidentified":<int>,"red_flags":[{"level":"stop|warn","text":"..."}]}''';
 
-  static const _itemSystem = '''
+  static const itemSystem = '''
 You read eBay Sold Items search results for ONE title for a US media reseller. Never use Terapeak-style estimates; use only the sold listings in the text. Never suggest list prices.
 
 RULES
@@ -260,7 +260,7 @@ List at most 8 comps, newest first, same-edition only.''';
         }
         try {
           final t = await claude.ask(
-            _itemSystem,
+            itemSystem,
             'TITLE: ${item.name}\nFORMAT: ${item.format}\nEDITION: ${item.edition.isEmpty ? '(standard)' : item.edition}\n'
             'COPY CONDITION: ${item.compCondition == 'sealed' ? 'sealed / new' : 'used'}\n\n'
             'EBAY SOLD ITEMS SEARCH TEXT (query: ${item.query})\n$soldText',

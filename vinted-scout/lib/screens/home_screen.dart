@@ -12,6 +12,7 @@ import 'comps_screen.dart';
 import 'history_screen.dart';
 import 'result_card.dart';
 import 'settings_screen.dart';
+import 'shelf_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -51,6 +52,14 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => CompsScreen(settings: s, initialText: text)),
+    );
+  }
+
+  Future<void> _openShelf() async {
+    final s = _settings ?? await _store.load();
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => ShelfScreen(settings: s)),
     );
   }
 
@@ -156,6 +165,11 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('Vinted Scout'),
         actions: [
+          IconButton(
+            tooltip: 'Shelf check: photo of a shelf, box or lot',
+            icon: const Icon(Icons.photo_camera),
+            onPressed: _openShelf,
+          ),
           IconButton(
             tooltip: 'Price check a listing (Mojo Comps)',
             icon: const Icon(Icons.price_check),

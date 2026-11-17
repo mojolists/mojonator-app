@@ -55,6 +55,56 @@ class ClaudeClient {
   /// Public entry points for other features (Comps).
   Future<String> ask(String system, String user, {int maxTokens = 4000}) =>
       _ask(system, user, maxTokens: maxTokens);
+
+  /// One image (JPEG/PNG bytes) plus a text prompt.
+  Future<String> askWithImage(String system, String user, List<int> imageBytes,
+      {String mediaType = 'image/jpeg', int maxTokens = 8000}) async {
+    final r = await session.postJson(
+      Uri.parse('https://api.anthropic.com/v1/messages'),
+      {
+        'model': model,
+        'max_tokens': maxTokens,
+        'system': system,
+        'messages': [
+          {
+            'role': 'user',
+            'content': [
+              {
+                'type': 'image',
+                'source': {
+                  'type': 'base64',
+                  'media_type': mediaType,
+                  'data': base64Encode(imageBytes),
+                },
+              },
+              {'type': 'text', 'text': user},
+            ],
+          }
+        ],
+      },
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+    );
+    if (!r.ok) {
+      String detail = r.body;
+      try {
+        final j = jsonDecode(r.body) as Map<String, dynamic>;
+        detail = (j['error']?['message'] ?? r.body).toString();
+      } catch (_) {}
+      if (r.status == 401) {
+        throw ClaudeException('Claude API key rejected (401). Check the key in Settings.');
+      }
+      throw ClaudeException('Claude API error ${r.status}: $detail');
+    }
+    final j = jsonDecode(r.body) as Map<String, dynamic>;
+    final buf = StringBuffer();
+    for (final c in (j['content'] as List? ?? const [])) {
+      if (c is Map && c['type'] == 'text') buf.write(c['text']);
+    }
+    return buf.toString();
+  }
   static Map<String, dynamic> extractJson(String text) => _extractJson(text);
 
   static Map<String, dynamic> _extractJson(String text) {
