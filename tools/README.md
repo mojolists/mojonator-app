@@ -50,3 +50,11 @@ Picture Services and writes a `vinted-*.json` job file (copy in `Mojo Lister\dat
 - Descriptions: title + UPC + tracklist — NO case line (he swaps broken cases).
 - The eBay HTML description is saved in `Mojo Lister\data\ebay-description-library.json` (keyed by UPC) for a later identical item.
 - After the run: `dupCheck()`; results also in localStorage `__mojo_vinted_only_log`.
+
+## Marking in Mojonator (2026-11-17)
+
+Listings made by the runner are linked in Mojonator - and marked "eBay + Vinted" when the eBay listing stays live - by the
+Crosslist Sync Chrome helper (crosslist-sync/vinted-hider.user.js 0.3.0) within about 15 minutes, on the X51 or the data PC.
+Nothing has to be run by hand. A cross-listed job must keep the eBay title as the Vinted title (the runner adds the " - SKU"
+tail): that exact title + SKU is what the marking matches on when the run was not made in that PC's Chrome.
+After a run, check the program's log for "marked cross-listed in Mojonator" lines, one per cross-listed job.

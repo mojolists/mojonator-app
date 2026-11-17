@@ -18,7 +18,7 @@
        orders:[{txId,title,price,date,status}], runner:[{vintedId,ebayItemId,title,price,listedAt}] } */
 (function (root) {
   'use strict';
-  var VERSION = 'v4'; // v2: listing photo URLs (vintedPhotos); v3: multi-copy items (quantity) split one copy per Vinted listing; v4: cross-listed items (crossStatus, MOJO_SYNC_V7_CROSSLIST)
+  var VERSION = 'v5'; // v5: syncAll() marks cross-listed items at once (MOJO_VINTED_V5_CROSSMARK, 2026-11-17); v2: listing photo URLs (vintedPhotos); v3: multi-copy items (quantity) split one copy per Vinted listing; v4: cross-listed items (crossStatus, MOJO_SYNC_V7_CROSSLIST)
   var STOP = {}; 'cd cds dvd dvds blu ray bluray the of a an and with new like good very used disc discs edition lot in to for by on movie movies album'.split(' ').forEach(function (w) { STOP[w] = 1; });
 
   function toks(s) {
@@ -319,7 +319,76 @@
       .then(function () { return { at: new Date().toISOString(), complete: complete, memberId: String(memberId), wardrobe: wardrobe, orders: orders, runner: runnerLog || [] }; });
   }
 
-  var api = { VERSION: VERSION, splitCopy: splitCopy, merge: merge, dedupe: dedupe, link: link, keepAsNew: keepAsNew, unlink: unlink, search: search, rank: rank, decide: decide, collect: collect, _score: function (a, b) { return score(toks(a), toks(b)); } };
+
+  /* -------- MOJO_VINTED_V5_CROSSMARK (2026-11-17) --------
+     Why: a cassette sold on Vinted while a twin listing was live on eBay, and nothing had marked the pair, so the
+     crosslist sync tool could not end the eBay side. Every sync now goes through syncAll(), which
+       1. crossPrep: finds each Vinted listing no record knows yet whose title (minus the " - SKU" tail the listing
+          runner adds) is EXACTLY the title of ONE item still live on eBay, with the same SKU when the Vinted title
+          carries one, and feeds it to merge() as an exact link (same as a listing-runner record);
+       2. merge();
+       3. crossMark: every record that is live on eBay and active on Vinted is marked crossStatus 'both' right away
+          (the hourly eBay sync used to be the only thing that set it);
+       4. Vinted-only listings made by the Mojo Lister "Vinted" checkbox (snap.vintedOnly) are kept as their own
+          items instead of sitting in the confirm queue.
+     A listing whose twin cannot be pinned down (same title, different SKU; several copies) is NOT linked: it lands
+     in the confirm queue and is returned in rep.unsure so the caller can alert. */
+  function splitSku(t) {
+    t = String(t || '').trim();
+    var m = t.match(/^(.*\S)\s+-\s+([A-Za-z0-9]{1,8}(?: [A-Za-z0-9]{1,8})?)$/);
+    return m ? { base: m[1], sku: m[2] } : { base: t, sku: '' };
+  }
+  function unesc(s) { return String(s || '').replace(/&amp;/g, '&').replace(/&#0?39;|&apos;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>'); }
+  function normX(s) { return normT(unesc(s)); }
+  function liveOnEbay(it) { return it.status === 'listed' && it.account !== 'V' && !!it.ebayItemId && !it.vintedId && !(it.quantity != null && it.quantity !== '' && Number(it.quantity) < 1); }
+  /* Live eBay items whose title is exactly this Vinted title. -> { hit: item|null, same: [items], sku } */
+  function ebayTwin(items, vintedTitle) {
+    var sp = splitSku(vintedTitle), full = normX(vintedTitle), base = normX(sp.base);
+    var same = items.filter(function (it) { if (!liveOnEbay(it)) return false; var t = normX(it.title); return t === full || t === base; });
+    var hit = null;
+    if (sp.sku) { var bySku = same.filter(function (it) { return normT(it.sku) === normT(sp.sku) && normX(it.title) === base; }); if (bySku.length === 1) hit = bySku[0]; }
+    else if (same.length === 1) hit = same[0];
+    return { hit: hit, same: same, sku: sp.sku };
+  }
+  function crossPrep(data, snap) {
+    var known = {}; data.items.forEach(function (it) { if (it.vintedId) known[String(it.vintedId)] = 1; });
+    var runner = (snap.runner || []).slice(), have = {}; runner.forEach(function (r) { have[String(r.vintedId)] = 1; });
+    var used = {}, added = [], unsure = [];
+    (snap.wardrobe || []).forEach(function (L) {
+      var vid = String(L.id); if (known[vid] || have[vid] || L.closed) return;
+      var tw = ebayTwin(data.items, L.title);
+      if (tw.hit && !used[tw.hit.id]) { used[tw.hit.id] = 1; runner.push({ vintedId: vid, ebayItemId: String(tw.hit.ebayItemId), title: L.title, price: L.price, crossPrep: true }); added.push({ vintedId: vid, ebayItemId: String(tw.hit.ebayItemId), title: L.title }); }
+      else if (tw.same.length) unsure.push({ vintedId: vid, title: L.title, ebay: tw.same.map(function (it) { return { ebayItemId: String(it.ebayItemId), sku: it.sku || '' }; }) });
+    });
+    snap.runner = runner;
+    return { added: added, unsure: unsure };
+  }
+  function syncAll(data, snap, opts) {
+    var pre = {}; data.items.forEach(function (it) { pre[it.id] = { account: it.account, status: it.status, askingPrice: it.askingPrice, listedDate: it.listedDate, quantity: it.quantity, ebayItemId: it.ebayItemId }; });
+    var prep = crossPrep(data, snap);
+    var rep = merge(data, snap, opts);
+    var marked = [];
+    data.items.forEach(function (it) {
+      var p = pre[it.id]; if (!p) return;
+      if (it.account === 'V' && p.account !== 'V' && p.status === 'listed' && p.ebayItemId && !(p.quantity != null && p.quantity !== '' && Number(p.quantity) < 1)
+          && it.status === 'listed' && (it.vintedStatus === 'active' || it.vintedStatus === 'reserved' || it.vintedStatus === 'hidden')) {
+        it.ebayPrice = p.askingPrice; it.ebayListedDate = p.listedDate; it.ebayQty = (p.quantity == null || p.quantity === '') ? 1 : Number(p.quantity);
+        it.crossStatus = 'both'; if (!it.crossListedEbay) it.crossListedEbay = it.vintedListedDate || rep.at.slice(0, 10);
+        it.vUpdated = rep.at; marked.push({ title: it.title, sku: it.sku || '', ebayItemId: String(it.ebayItemId), vintedId: String(it.vintedId) });
+      }
+    });
+    var vo = {}; (snap.vintedOnly || []).forEach(function (x) { vo[String(x.vintedId)] = x; });
+    data.items.forEach(function (it) {
+      if (!it.vintedCreated || it.vintedMatch !== 'pending' || pre[it.id] || !vo[String(it.vintedId)]) return;
+      it.vintedMatch = 'confirmed'; it.vintedCandidates = ''; it.vintedNote = '';
+      var l = vo[String(it.vintedId)]; if (l.sku && !it.sku) { it.sku = l.sku; it.location = l.sku; }
+    });
+    rep.crossMarked = marked; rep.unsure = prep.unsure;
+    if (marked.length) rep.changed = true;
+    return rep;
+  }
+
+  var api = { VERSION: VERSION, splitCopy: splitCopy, merge: merge, dedupe: dedupe, link: link, keepAsNew: keepAsNew, unlink: unlink, search: search, rank: rank, decide: decide, collect: collect, syncAll: syncAll, crossPrep: crossPrep, ebayTwin: ebayTwin, splitSku: splitSku, _score: function (a, b) { return score(toks(a), toks(b)); } };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.MojoVinted = api;
 })(typeof window !== 'undefined' ? window : this);

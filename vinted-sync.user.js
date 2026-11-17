@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         Mojonator Vinted Sync
 // @namespace    https://mojolists.com/mojonator-app/
-// @version      1.0.3
+// @version      1.0.4
 // @description  Reads your Vinted listings and sold orders and writes them into Mojonator's data.json (mojolists/mojonator) — Vinted channel.
 // @author       Mojolists
 // @match        https://www.vinted.com/*
-// @require      https://mojolists.com/mojonator-app/vinted-merge.js?v=137
+// @require      https://mojolists.com/mojonator-app/vinted-merge.js?v=138
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -114,7 +114,7 @@
       function once() {
         attempt++; setBtn('saving to Mojonator…');
         return readData().then(function (got) {
-          var rep = MojoVinted.merge(got.data, snap, { by: 'userscript' });
+          var rep = (MojoVinted.syncAll || MojoVinted.merge)(got.data, snap, { by: 'userscript' }); // 1.0.4: syncAll also marks items live on eBay + Vinted
           if (!rep.changed) return rep;
           var msg = 'Vinted sync: ' + (rep.runnerLinked + rep.autoLinked.length) + ' linked, ' + rep.pending.length + ' to confirm, ' + rep.newSales.length + ' new sale(s), ' + rep.updated + ' updated';
           return writeData(got.sha, got.data, msg).then(function (st) {

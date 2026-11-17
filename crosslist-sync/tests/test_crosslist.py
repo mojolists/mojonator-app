@@ -6,7 +6,7 @@ from email.message import EmailMessage
 
 data_path = sys.argv[1]
 tmp = tempfile.mkdtemp()
-for n in ('STATE_FILE', 'LOG_FILE', 'ACTIONS_FILE', 'CACHE_FILE'): setattr(X, n, os.path.join(tmp, n))
+for n in ('STATE_FILE', 'LOG_FILE', 'ACTIONS_FILE', 'CACHE_FILE', 'WARD_FILE'): setattr(X, n, os.path.join(tmp, n))
 sent = []
 X.Alerts.send = lambda self, title, body, click=None, key=None, repeat_hours=6, high=False: sent.append((title, body, click)) or True
 
@@ -93,7 +93,7 @@ s = make('watch'); s.ebay.orders = X.parse_orders(ORDERS_XML % A['ebayItemId']);
 s.mail.raws = [vinted_mail('<n3@v>', A['title'], codeA)]; s.cycle(); assert sent[-1][0].startswith('SOLD ON BOTH'), sent
 # unknown Vinted listing, and an email with no photo
 s = make('watch'); s.mail.raws = [vinted_mail('<n4@v>', 'Some brand new listing', '01_00abc_ZZZZZZZZZZZZZZZZZZZZZZZZ'), vinted_mail('<n5@v>', 'No photo', '')]; s.cycle()
-assert len(sent) == 2 and all(t[0].startswith('Check Vinted sale') for t in sent), sent
+assert len(sent) == 1 and sent[0][0] == 'Check Vinted sale', sent  # 0.3.0: an unknown listing with no eBay twin is not an alert any more; a sale email with no photo still is
 # Vinted-only item sells (not on eBay): no alert
 vonly = [i for i in items if i.get('vintedId') and i.get('account') == 'V' and not i.get('ebayItemId') and i.get('vintedPhotos') and i.get('status') == 'listed'][0]
 s = make('watch'); s.mail.raws = [vinted_mail('<n6@v>', vonly['title'], X.PHOTO_RE.search(vonly['vintedPhotos'][0]).group(1))]; s.cycle(); assert not sent, sent
@@ -145,8 +145,60 @@ assert len(sent) == 1 and sent[0][0].startswith('BACKUP hid it on Vinted'), sent
 b = makeb(); b.mail.raws = [vinted_mail('<b4@v>', 'Some brand new listing', '01_00abc_ZZZZZZZZZZZZZZZZZZZZZZZZ')]
 phone.add('Check Vinted sale: Some brand new listing'); b.cycle(); age(b, 21); b.cycle(); assert not sent, sent
 phone.clear(); b = makeb(); b.mail.raws = [vinted_mail('<b5@v>', 'Some brand new listing', '01_00abc_ZZZZZZZZZZZZZZZZZZZZZZZZ')]; b.cycle(); age(b, 21); b.cycle()
-assert len(sent) == 1 and sent[0][0].startswith('Check Vinted sale'), sent
+assert not sent, sent  # 0.3.0: nothing on eBay has that title, so there is nothing to tell
 # main role is unchanged by all this: acts at once
 s = make('live'); s.state['browser_seen'] = time.time(); s.mail.raws = [vinted_mail('<b6@v>', B['title'], codeB)]; s.cycle(); assert s.ebay.zeroed == [str(B['ebayItemId'])] and not sent
 print('backup role ok')
 print('ALL PASS')
+
+
+# ---------------------------------------------------------------- 0.3.0: sales Mojonator has not linked
+assert X.split_sku('Queen The Game Cassette 1980 - A4') == ('Queen The Game Cassette 1980', 'A4') and X.split_sku('Plain') == ('Plain', '')
+pool = [{'title': 'Queen The Game Cassette', 'sku': 'A3', 'ebayItemId': '1', 'id': 'a'}, {'title': 'Queen The Game Cassette', 'sku': 'A4', 'ebayItemId': '2', 'id': 'b'}, {'title': 'Queen Jazz Cassette', 'sku': 'A4', 'ebayItemId': '3', 'id': 'c'}]
+pk, ex, nr = X.twins('Queen The Game Cassette - A4', pool); assert pk['id'] == 'b' and len(ex) == 2
+pk, ex, nr = X.twins('Queen The Game Cassette - GBA', pool); assert pk is None and len(ex) == 2
+pk, ex, nr = X.twins('Queen The Game Cassette', pool[:1]); assert pk['id'] == 'a'
+pk, ex, nr = X.twins('Queen The Game Tape Cassette 1980', pool[:1]); assert pk is None and not ex and nr and nr[0][1]['id'] == 'a', nr
+pk, ex, nr = X.twins('Steve Winwood Back in the High Life Cassette', pool); assert pk is None and not ex and not nr
+print('twins ok')
+
+s = make('live')
+lv = s.links.live
+assert len(lv) > 300, len(lv)
+titles = {}
+for e in lv: titles.setdefault(X.norm_title(e['title']), []).append(e)
+solo = [v[0] for v in titles.values() if len(v) == 1 and not X.split_sku(v[0]['title'])[1]]
+L1, L2, L3 = solo[0], solo[1], solo[2]
+# 1. unlinked Vinted sale, same title + same SKU live on eBay -> taken off eBay, Doug told
+s.mail.raws.append(vinted_mail('<u1@v>', L1['title'] + ' - ' + (L1['sku'] or 'ZZ'), '09_0aaaa_UnknownCodeAAAAAAAAAAAAAAAA')); s.cycle()
+assert s.ebay.zeroed == [L1['ebayItemId']], s.ebay.zeroed
+assert any(a[0].startswith('Took it off eBay') and 'second copy' not in a[1] for a in sent), sent
+# 2. same title, DIFFERENT SKU (the 2026-11-17 Queen case: Vinted says A4, the live eBay listing is A3) -> still taken off, with the second-copy note
+del sent[:]
+s.mail.raws.append(vinted_mail('<u2@v>', L2['title'] + ' - QQ9', '09_0bbbb_UnknownCodeBBBBBBBBBBBBBBBB')); s.cycle()
+assert s.ebay.zeroed[-1] == L2['ebayItemId'] and any(a[0].startswith('Took it off eBay') and 'second copy' in a[1] for a in sent), sent
+# 3. nothing like it on eBay -> no alert at all (Vinted-only item)
+del sent[:]; n0 = len(s.ebay.zeroed)
+s.mail.raws.append(vinted_mail('<u3@v>', 'Zzyzx Qwfp Plugh Xyzzy Cassette 1901 - A4', '09_0cccc_UnknownCodeCCCCCCCCCCCCCCCC')); s.cycle()
+assert len(s.ebay.zeroed) == n0 and not sent, sent
+# 4. same_title_twins = alert -> not touched, Doug asked
+s.cfg['same_title_twins'] = 'alert'
+s.mail.raws.append(vinted_mail('<u4@v>', L3['title'], '09_0dddd_UnknownCodeDDDDDDDDDDDDDDDD')); s.cycle()
+assert len(s.ebay.zeroed) == n0 and any(a[0].startswith('End on eBay?') for a in sent), sent
+# 5. watch mode never changes anything
+s = make('watch'); s.mail.raws.append(vinted_mail('<u5@v>', L1['title'], '09_0eeee_UnknownCodeEEEEEEEEEEEEEEEE')); s.cycle()
+assert not s.ebay.zeroed and any(a[0].startswith('Sold on Vinted') for a in sent), sent
+# 6. unlinked eBay sale whose title is active on Vinted (from the helper's wardrobe) -> Vinted hide queued
+s = make('live')
+X.save_json(X.WARD_FILE, {'at': X.iso(), 'items': [{'id': '777', 'title': 'Some Unlinked Album CD 1999 - GBA', 'closed': False, 'hidden': False, 'url': 'https://www.vinted.com/items/777', 'codes': []},
+                                                   {'id': '778', 'title': 'Closed One CD', 'closed': True, 'hidden': False, 'url': '', 'codes': []}]})
+s.ebay.orders = [('22-1', '2026-11-17T10:00:00.000Z', [('555000111', 'Some Unlinked Album CD 1999')]), ('22-2', '2026-11-17T10:00:00.000Z', [('555000112', 'Closed One CD')])]
+s.cycle()
+assert [q['vintedId'] for q in s.state['queue']] == ['777'], s.state['queue']
+# 7. backup: waits, then acts only if the main PC has not
+phone.clear(); b = makeb()
+b.mail.raws.append(vinted_mail('<u7@v>', L1['title'], '09_0ffff_UnknownCodeFFFFFFFFFFFFFFFF')); b.cycle()
+assert not b.ebay.zeroed
+age(b, 25); b.cycle()
+assert b.ebay.zeroed == [L1['ebayItemId']] and any(a[0].startswith('BACKUP took it off eBay') for a in sent), (b.ebay.zeroed, sent)
+print('unlinked-sale fallback ok')

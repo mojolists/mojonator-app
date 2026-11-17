@@ -1,11 +1,13 @@
 // ==UserScript==
 // @name         Mojo Crosslist - Vinted hider
 // @namespace    https://mojolists.com/
-// @version      0.2.1
-// @description  Hides a Vinted listing when the Crosslist Sync program on this PC says its twin sold on eBay.
+// @version      0.3.0
+// @description  Hides a Vinted listing when the Crosslist Sync program on this PC says its twin sold on eBay, and keeps Mojonator's Vinted links and cross-listed marks up to date.
 // @match        https://www.vinted.com/*
 // @grant        GM_xmlhttpRequest
 // @connect      127.0.0.1
+// @connect      api.github.com
+// @require      https://mojolists.com/mojonator-app/vinted-merge.js?v=138
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/mojolists/mojonator-app/main/crosslist-sync/vinted-hider.user.js
 // @downloadURL  https://raw.githubusercontent.com/mojolists/mojonator-app/main/crosslist-sync/vinted-hider.user.js
@@ -14,7 +16,8 @@
    (http://127.0.0.1:8765) for listings to hide, hides each with Vinted's own request
    (PUT /api/v2/items/{id}/is_hidden), checks the listing really is hidden, and reports back.
    In watch-only mode the program hands it nothing, so it only checks in.
-   One tab does the work at a time (a lock in localStorage), and it stops on any Vinted check page. */
+   One tab does the work at a time (a lock in localStorage), and it stops on any Vinted check page.
+   0.3.0: the same tab also keeps Mojonator's Vinted links and cross-listed marks current - see mojoSync() below. */
 (function () {
   'use strict';
   if (window.top !== window.self) return;
@@ -103,6 +106,89 @@
       catch (e) { try { await local('POST', '/done', { vintedId: it.vintedId, ok: false, detail: String(e.message || e) }); } catch (e2) {} break; } // stop on the first failure
       await sleep(20000 + Math.random() * 20000); // unhurried, like a person
     }
+    try { await mojoSync(); } catch (e) {} // 0.3.0
+  }
+  /* ---- 0.3.0 (2026-11-17): keep Mojonator's Vinted links and "eBay + Vinted" marks current, from this always-open tab.
+     Why: Mojonator only learned about Vinted listings when its own sync was run, and that had not happened since Nov 8.
+     A cassette then sold on Vinted with a twin live on eBay and the program had nothing to go on.
+     Every 15 minutes this reads the profile (listings + sold orders), tells the local program what is on Vinted, and - when
+     something changed - runs Mojonator's own Vinted sync (vinted-merge.js syncAll: links new listings, marks items live on
+     both sites) and saves data.json with the GitHub token from the program's config.json. The backup PC gives the main PC
+     20 minutes to do it first. Nothing is written between :12 and :30 (the hourly eBay sync commits at :17). */
+  var SYNC_EVERY = 15 * 60 * 1000, XKEY = '__mojo_xsync';
+  function lget(k, d) { try { var v = JSON.parse(localStorage.getItem(k) || 'null'); return v == null ? d : v; } catch (e) { return d; } }
+  function lset(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  async function vget(url) { var r = await vfetch(url, { headers: { accept: 'application/json' }, credentials: 'include' }); if (!r.ok) throw new Error('Vinted ' + r.status + ' on ' + url.split('?')[0]); return r.json(); }
+  function runnerLog() {
+    var out = lget('__mojo_vinted_log', []).slice();
+    var o = lget('__vrun', null);
+    ((o && o.done) || []).forEach(function (d) { if (d && d.v && d.e && !/^draft:/.test(String(d.e))) out.push({ vintedId: String(d.v), ebayItemId: String(d.e) }); });
+    return out;
+  }
+  function gh(token, method, url, body, accept) {
+    return new Promise(function (resolve, reject) {
+      GM_xmlhttpRequest({ method: method, url: 'https://api.github.com' + url,
+        headers: { Authorization: 'Bearer ' + token, Accept: accept || 'application/vnd.github+json', 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
+        data: body ? JSON.stringify(body) : undefined, timeout: 120000,
+        onload: function (r) { resolve({ status: r.status, text: r.responseText }); },
+        onerror: function () { reject(new Error('network error talking to GitHub')); }, ontimeout: function () { reject(new Error('GitHub timed out')); } });
+    });
+  }
+  function b64(str) { var bytes = new TextEncoder().encode(str), bin = '', CH = 0x8000; for (var i = 0; i < bytes.length; i += CH) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH)); return btoa(bin); }
+  async function readData(cfg) {
+    var r = await gh(cfg.token, 'GET', '/repos/' + cfg.repo + '/contents/data.json?ref=main&t=' + Date.now());
+    if (r.status !== 200) throw new Error('GitHub read ' + r.status);
+    var meta = JSON.parse(r.text);
+    if (meta.content && meta.encoding === 'base64') return { sha: meta.sha, data: JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(meta.content.replace(/\s/g, '')), function (c) { return c.charCodeAt(0); }))) };
+    var b = await gh(cfg.token, 'GET', '/repos/' + cfg.repo + '/git/blobs/' + meta.sha, null, 'application/vnd.github.raw+json');
+    if (b.status !== 200) throw new Error('GitHub blob ' + b.status);
+    return { sha: meta.sha, data: JSON.parse(b.text) };
+  }
+  async function pushMojonator(cfg, snap) {
+    for (var attempt = 1; attempt <= 3; attempt++) {
+      var got = await readData(cfg);
+      var rep = MojoVinted.syncAll(got.data, snap, { by: 'crosslist helper' });
+      if (!rep.changed) return rep;
+      if (got.data.settings) got.data.settings.ghToken = '';
+      var msg = 'Vinted sync (crosslist helper): ' + (rep.runnerLinked + rep.autoLinked.length) + ' linked, ' + rep.crossMarked.length + ' marked eBay + Vinted, ' + rep.pending.length + ' to confirm, ' + rep.newSales.length + ' new sale(s)';
+      var w = await gh(cfg.token, 'PUT', '/repos/' + cfg.repo + '/contents/data.json', { message: msg, content: b64(JSON.stringify(got.data, null, 2)), branch: 'main', sha: got.sha });
+      if (w.status === 200 || w.status === 201) return rep;
+      if (w.status !== 409 && w.status !== 422) throw new Error('GitHub write ' + w.status);
+      await sleep(3000);
+    }
+    throw new Error('data.json kept changing');
+  }
+  function hashOf(snap) {
+    var s = JSON.stringify([snap.wardrobe.map(function (o) { return [o.id, o.title, o.price, o.closed, o.hidden, o.reserved]; }), (snap.orders || []).map(function (o) { return [o.txId, o.status]; }), (snap.runner || []).length]);
+    var h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+    return String(h) + ':' + s.length;
+  }
+  async function mojoSync() {
+    var st = lget(XKEY, {});
+    if (Date.now() - (st.at || 0) < SYNC_EVERY) return;
+    if (typeof MojoVinted === 'undefined' || !MojoVinted.syncAll) return;
+    if (/\/items\/(new|\d+\/edit)|\/checkout/.test(location.pathname)) return;
+    st.at = Date.now(); lset(XKEY, st);
+    var snap = await MojoVinted.collect(vget, MEMBER, runnerLog());
+    snap.vintedOnly = lget('__mojo_vinted_only_log', []);
+    if (!snap.wardrobe.length) return;
+    var out = { items: snap.wardrobe.map(function (o) { return { id: o.id, title: o.title, closed: o.closed, hidden: o.hidden, url: o.url, photos: o.photos }; }) };
+    var cfg = null; try { cfg = await local('GET', '/ghtoken'); } catch (e) {}
+    var hash = hashOf(snap), need = hash !== st.hash || Date.now() - (st.synced || 0) > 12 * 3600 * 1000;
+    if (cfg && cfg.token && cfg.repo && need) {
+      if (hash !== st.pendingHash) { st.pendingHash = hash; st.pendingSince = Date.now(); }
+      var wait = cfg.role === 'backup' ? 20 * 60 * 1000 : 0, min = new Date().getMinutes();
+      if (Date.now() - st.pendingSince >= wait && !(min >= 12 && min < 30)) {
+        try {
+          var rep = await pushMojonator(cfg, snap);
+          st.hash = hash; st.synced = Date.now();
+          out.sync = (rep.changed ? 'saved' : 'up to date') + ': ' + rep.listings + ' listings, ' + (rep.runnerLinked + rep.autoLinked.length) + ' linked, ' + rep.crossMarked.length + ' marked eBay + Vinted, ' + rep.pending.length + ' to confirm, ' + rep.newSales.length + ' new sale(s)';
+          out.marked = rep.crossMarked; out.unsure = rep.unsure;
+        } catch (e) { out.sync = 'FAILED ' + String(e.message || e); }
+      }
+    }
+    lset(XKEY, st);
+    try { await local('POST', '/wardrobe', out); } catch (e) {}
   }
   setTimeout(tick, 15000); setInterval(tick, EVERY);
 })();
