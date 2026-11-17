@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vinted Scout download</title></head>
+<body style="font-family:sans-serif;padding:24px;font-size:20px">
+<p id="s">Finding the newest Vinted Scout…</p>
+<p><a id="a" style="font-size:24px" href="https://github.com/mojolists/mojonator-app/releases/download/vinted-scout-build-14/VintedScout-android.apk">Download Vinted Scout (Android)</a></p>
+<script>
+fetch('https://api.github.com/repos/mojolists/mojonator-app/releases?per_page=30')
+ .then(r=>r.json()).then(list=>{
+  const rel=list.find(x=>/^vinted-scout-build-/.test(x.tag_name));
+  const apk=rel&&rel.assets.find(a=>a.name==='VintedScout-android.apk');
+  if(apk){document.getElementById('a').href=apk.browser_download_url;
+    document.getElementById('s').textContent='Newest: '+rel.tag_name+'. Downloading…';
+    location.href=apk.browser_download_url;}
+ }).catch(()=>{document.getElementById('s').textContent='Tap the link below.';});
+</script></body></html>
