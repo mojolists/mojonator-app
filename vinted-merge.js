@@ -18,7 +18,7 @@
        orders:[{txId,title,price,date,status}], runner:[{vintedId,ebayItemId,title,price,listedAt}] } */
 (function (root) {
   'use strict';
-  var VERSION = 'v5'; // v5: syncAll() marks cross-listed items at once (MOJO_VINTED_V5_CROSSMARK, 2026-11-17); v2: listing photo URLs (vintedPhotos); v3: multi-copy items (quantity) split one copy per Vinted listing; v4: cross-listed items (crossStatus, MOJO_SYNC_V7_CROSSLIST)
+  var VERSION = 'v6'; // v6: a title match is never a link - only exact eBay item numbers are (2026-11-17); v5: syncAll() marks cross-listed items at once (MOJO_VINTED_V5_CROSSMARK); v2: listing photo URLs (vintedPhotos); v3: multi-copy items (quantity) split one copy per Vinted listing; v4: cross-listed items (crossStatus, MOJO_SYNC_V7_CROSSLIST)
   var STOP = {}; 'cd cds dvd dvds blu ray bluray the of a an and with new like good very used disc discs edition lot in to for by on movie movies album'.split(' ').forEach(function (w) { STOP[w] = 1; });
 
   function toks(s) {
@@ -323,16 +323,16 @@
   /* -------- MOJO_VINTED_V5_CROSSMARK (2026-11-17) --------
      Why: a cassette sold on Vinted while a twin listing was live on eBay, and nothing had marked the pair, so the
      crosslist sync tool could not end the eBay side. Every sync now goes through syncAll(), which
-       1. crossPrep: finds each Vinted listing no record knows yet whose title (minus the " - SKU" tail the listing
-          runner adds) is EXACTLY the title of ONE item still live on eBay, with the same SKU when the Vinted title
-          carries one, and feeds it to merge() as an exact link (same as a listing-runner record);
+       1. crossPrep: NEVER links by title (v6, Doug 2026-11-17: the same title is often another copy, another condition
+          or a multi-quantity listing). A link comes only from an exact eBay item number <-> Vinted id pair: a listing-runner
+          record (snap.runner) or tools/mark-run.js. A new Vinted listing whose title is also live on eBay is only REPORTED
+          (rep.unsure) so Doug can be asked whether it is cross-listed;
        2. merge();
        3. crossMark: every record that is live on eBay and active on Vinted is marked crossStatus 'both' right away
           (the hourly eBay sync used to be the only thing that set it);
        4. Vinted-only listings made by the Mojo Lister "Vinted" checkbox (snap.vintedOnly) are kept as their own
           items instead of sitting in the confirm queue.
-     A listing whose twin cannot be pinned down (same title, different SKU; several copies) is NOT linked: it lands
-     in the confirm queue and is returned in rep.unsure so the caller can alert. */
+     A title-only match lands in the confirm queue and in rep.unsure so the caller can alert. */
   function splitSku(t) {
     t = String(t || '').trim();
     var m = t.match(/^(.*\S)\s+-\s+([A-Za-z0-9]{1,8}(?: [A-Za-z0-9]{1,8})?)$/);
@@ -357,8 +357,7 @@
     (snap.wardrobe || []).forEach(function (L) {
       var vid = String(L.id); if (known[vid] || have[vid] || L.closed) return;
       var tw = ebayTwin(data.items, L.title);
-      if (tw.hit && !used[tw.hit.id]) { used[tw.hit.id] = 1; runner.push({ vintedId: vid, ebayItemId: String(tw.hit.ebayItemId), title: L.title, price: L.price, crossPrep: true }); added.push({ vintedId: vid, ebayItemId: String(tw.hit.ebayItemId), title: L.title }); }
-      else if (tw.same.length) unsure.push({ vintedId: vid, title: L.title, ebay: tw.same.map(function (it) { return { ebayItemId: String(it.ebayItemId), sku: it.sku || '' }; }) });
+      if (tw.same.length) unsure.push({ vintedId: vid, title: L.title, ebay: tw.same.map(function (it) { return { ebayItemId: String(it.ebayItemId), sku: it.sku || '' }; }) });
     });
     snap.runner = runner;
     return { added: added, unsure: unsure };

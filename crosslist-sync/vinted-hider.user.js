@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         Mojo Crosslist - Vinted hider
 // @namespace    https://mojolists.com/
-// @version      0.3.0
+// @version      0.3.1
 // @description  Hides a Vinted listing when the Crosslist Sync program on this PC says its twin sold on eBay, and keeps Mojonator's Vinted links and cross-listed marks up to date.
 // @match        https://www.vinted.com/*
 // @grant        GM_xmlhttpRequest
 // @connect      127.0.0.1
 // @connect      api.github.com
-// @require      https://mojolists.com/mojonator-app/vinted-merge.js?v=138
+// @require      https://mojolists.com/mojonator-app/vinted-merge.js?v=139
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/mojolists/mojonator-app/main/crosslist-sync/vinted-hider.user.js
 // @downloadURL  https://raw.githubusercontent.com/mojolists/mojonator-app/main/crosslist-sync/vinted-hider.user.js
@@ -112,8 +112,8 @@
      Why: Mojonator only learned about Vinted listings when its own sync was run, and that had not happened since Nov 8.
      A cassette then sold on Vinted with a twin live on eBay and the program had nothing to go on.
      Every 15 minutes this reads the profile (listings + sold orders), tells the local program what is on Vinted, and - when
-     something changed - runs Mojonator's own Vinted sync (vinted-merge.js syncAll: links new listings, marks items live on
-     both sites) and saves data.json with the GitHub token from the program's config.json. The backup PC gives the main PC
+     something changed - runs Mojonator's own Vinted sync (vinted-merge.js syncAll: links listings by exact eBay item number
+     from the listing runner's records, marks those live on both sites; a title match is never a link, only an alert) and saves data.json with the GitHub token from the program's config.json. The backup PC gives the main PC
      20 minutes to do it first. Nothing is written between :12 and :30 (the hourly eBay sync commits at :17). */
   var SYNC_EVERY = 15 * 60 * 1000, XKEY = '__mojo_xsync';
   function lget(k, d) { try { var v = JSON.parse(localStorage.getItem(k) || 'null'); return v == null ? d : v; } catch (e) { return d; } }

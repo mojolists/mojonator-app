@@ -51,10 +51,18 @@ Picture Services and writes a `vinted-*.json` job file (copy in `Mojo Lister\dat
 - The eBay HTML description is saved in `Mojo Lister\data\ebay-description-library.json` (keyed by UPC) for a later identical item.
 - After the run: `dupCheck()`; results also in localStorage `__mojo_vinted_only_log`.
 
-## Marking in Mojonator (2026-11-17)
+## Marking in Mojonator - REQUIRED last step of every run (2026-11-17)
 
-Listings made by the runner are linked in Mojonator - and marked "eBay + Vinted" when the eBay listing stays live - by the
-Crosslist Sync Chrome helper (crosslist-sync/vinted-hider.user.js 0.3.0) within about 15 minutes, on the X51 or the data PC.
-Nothing has to be run by hand. A cross-listed job must keep the eBay title as the Vinted title (the runner adds the " - SKU"
-tail): that exact title + SKU is what the marking matches on when the run was not made in that PC's Chrome.
-After a run, check the program's log for "marked cross-listed in Mojonator" lines, one per cross-listed job.
+The crosslist sync tool only acts on items that are MARKED as cross-listed, and a mark is an exact pair of eBay item number and
+Vinted listing id - never a matching title (same title = often another copy, another condition, or a multi-quantity listing).
+So a run is not finished until its pairs are in Mojonator:
+
+1. Read the pairs once the run is done: `MojoVintedRunner.status().done` ("ebayItemId>vintedId") or localStorage `__mojo_vinted_log`.
+2. Save them as pairs.json: `[{ "vintedId": "...", "ebayItemId": "...", "title": "... - SKU", "price": 5 }]`
+3. In a clone of mojolists/mojonator: `node <mojonator-app>/tools/mark-run.js data.json pairs.json`, commit, push
+   (not between :12 and :30 past the hour - the hourly eBay sync commits at :17).
+4. The output must list every job that stays live on eBay under "eBay + Vinted". Anything under NOT LINKED is fixed before
+   telling Doug the run is done.
+
+Items ended on eBay after the run (moved, not cross-listed) get the same link; they simply are not marked "eBay + Vinted".
+The Chrome helper (crosslist-sync/vinted-hider.user.js) repeats this from the runner's records within 15 minutes as a backstop.

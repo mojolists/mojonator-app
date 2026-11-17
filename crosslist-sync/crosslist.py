@@ -5,8 +5,8 @@ Every few minutes it:
   1. asks eBay for new orders (Trading API GetOrders)
   2. reads new Vinted "You sold an item" emails over IMAP (read-only, never marks them read)
   3. matches each sale to its Mojonator record (eBay item number / Vinted photo code)
-     0.3.0: a sale Mojonator has not linked is no longer just an alert. The other site's live listings are
-     searched for the same title (+ SKU) and the twin is taken off sale; a near match is named in the alert.
+     Only items MARKED as cross-listed in Mojonator are ever changed. A sale of an unmarked item whose title is
+     also live on the other site gets an alert naming that listing - never an automatic end/hide (0.3.1).
   4. watch mode: logs and alerts what it WOULD do.  live mode: sets the eBay listing to
      quantity 0, or queues a Vinted "hide" for the browser helper (vinted-hider.user.js)
   5. pings the outside watchdog (healthchecks.io)
@@ -23,7 +23,7 @@ import urllib.error, urllib.parse, urllib.request
 from email.message import EmailMessage
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = '0.3.0'
+VERSION = '0.3.1'
 BASE = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__))
 CONFIG_FILE = os.path.join(BASE, 'config.json')
 STATE_FILE = os.path.join(BASE, 'state.json')
@@ -48,8 +48,6 @@ DEFAULT_CONFIG = {
     'pc_name': '',                         # shown in alerts; blank = 'X51' for main, 'backup PC' for backup
     'backup_healthcheck_url': '',          # backup role pings this one, never healthcheck_url
     'backup_pc_name': 'data PC',
-    'same_title_twins': 'end',             # a live eBay listing with the exact title of something that sold on Vinted, but not linked to it:
-                                           # 'end' = set it to quantity 0 and say so;  'alert' = only tell Doug (use this if second copies are common)
 }
 
 PHOTO_RE = re.compile(r'images\d*\.vinted\.net/t[a-z]*/(\d+_[0-9a-fA-F]+_[A-Za-z0-9]+)/')
@@ -507,7 +505,7 @@ class Service:
                 if after['available'] > 0: raise RuntimeError('still shows %d available' % after['available'])
                 self.note('  Vinted sale: "%s" -> eBay %s: %s (checked)' % (rec['title'][:60], st['id'], res))
                 self.act('zero-ebay', rec, st['id'], res)
-                if self.backup and not rec.get('unmarked'):
+                if self.backup:
                     self.tell('BACKUP took it off eBay: ' + rec['title'][:50], 'Sold on Vinted. The X51 had not taken it off eBay after %d min, so the %s did (%s). Check the X51.' % (float(self.cfg.get('backup_delay_minutes', 20)), self.pc, res), click=link, key='bzero:' + rec['id'], high=True)
                 return 'zeroed'
             except Exception as e:
@@ -525,73 +523,42 @@ class Service:
         w = load_json(WARD_FILE, None) if not self.dry else None
         return (w or {}).get('items') or []
 
-    def unlinked_vinted_sale(self, title, mid, codes=(), near_alert=True):
-        """A Vinted sale whose listing Mojonator does not know.  True = dealt with (acted, alerted, or nothing to do)."""
+    def unlinked_vinted_sale(self, title, mid, codes=()):
+        """A Vinted sale whose listing is not marked in Mojonator.  NOTHING is ever ended on a title match (0.3.1, Doug 2026-11-17:
+        the same title is often a different copy, another condition, or a multi-quantity listing).  The program only says which live
+        eBay listing(s) carry that title so Doug can decide.  True = an alert went out or there was nothing to say."""
         if not title:  # the email alt text is missing: use what the browser helper last saw for that photo
             for w in self.wardrobe():
                 if set(w.get('codes') or []) & set(codes): title = w.get('title') or ''; break
         if not title or not self.links.items_seen: return False
         pick, exact, near = twins(title, self.links.live)
         name = title[:60]
-        if pick and self.cfg.get('same_title_twins', 'end') != 'end':
-            self.tell('End on eBay? ' + name, 'Sold on Vinted. The same title is live on eBay (item %s, SKU %s) and is not marked as cross-listed. End it if it is the same item.' % (pick['ebayItemId'], pick['sku'] or '?'),
-                      click='https://www.ebay.com/itm/' + pick['ebayItemId'], key='utwin:' + pick['id'], high=True)
-            return True
-        if pick:
-            tail = split_sku(title)[1]
-            rec = {'id': pick['id'], 'title': pick['title'], 'location': pick['sku'], 'ebayItemId': pick['ebayItemId'], 'vintedId': '', 'vintedUrl': '',
-                   'vintedStatus': 'sold', 'crossStatus': '', 'status': 'listed', 'account': 'A', 'unmarked': True}
-            self.note('  not linked in Mojonator - same title is live on eBay as item %s (SKU %s): treating it as cross-listed' % (pick['ebayItemId'], pick['sku'] or '?'))
-            prev = self.state['sold'].get(rec['id'])
-            if prev: return True
-            self.state['sold'][rec['id']] = {'site': 'vinted', 'at': now(), 'ref': mid}
-            res = self.zero_on_ebay(rec)
-            if res == 'zeroed':
-                differ = bool(tail and pick['sku'] and tail.strip().lower() != pick['sku'].strip().lower())
-                self.tell(('BACKUP took it off eBay: ' if self.backup else 'Took it off eBay: ') + name,
-                          'Sold on Vinted. It was not marked as cross-listed in Mojonator, but the same title was live on eBay (item %s, SKU %s), so it is now quantity 0 there.%s%s'
-                          % (pick['ebayItemId'], pick['sku'] or '?',
-                             (' The Vinted listing says %s and the eBay one %s - if that is a second copy, put its quantity back to 1.' % (tail, pick['sku'])) if differ else '',
-                             ' The X51 had not done it.' if self.backup else ''),
-                          click='https://www.ebay.com/itm/' + pick['ebayItemId'], key='uzero:' + pick['id'], high=True)
-            return True
         if exact:
-            self.tell('End on eBay: ' + name, 'Sold on Vinted. %d live eBay listings have this exact title (%s) and the SKU does not say which. End the right one.'
-                      % (len(exact), ', '.join('%s %s' % (e['ebayItemId'], e['sku'] or '') for e in exact[:4])), click='https://www.ebay.com/itm/' + exact[0]['ebayItemId'], key='uamb:' + mid, high=True)
+            self.note('  Vinted sale: "%s" - NOT marked as cross-listed; same title live on eBay: %s - alert only, nothing changed' % (name, ', '.join('%s (%s)' % (e['ebayItemId'], e['sku'] or '?') for e in exact[:6])))
+            self.tell('Sold on Vinted - on eBay too? ' + name, 'This Vinted listing is not marked as cross-listed, so nothing was changed. Live eBay listing%s with the same title: %s. End it only if it is the same item.'
+                      % ('s' if len(exact) > 1 else '', ', '.join('%s (SKU %s)' % (e['ebayItemId'], e['sku'] or '?') for e in exact[:6])),
+                      click='https://www.ebay.com/itm/' + exact[0]['ebayItemId'], key='utwin:' + mid, high=True)
             return True
-        if near and not near_alert: return True
         if near:
             sc, e = near[0]
-            self.tell('Check Vinted sale: ' + name, 'Not marked as cross-listed. The closest live eBay listing is "%s" (item %s, SKU %s). End it if it is the same item.'
+            self.tell('Sold on Vinted - on eBay too? ' + name, 'This Vinted listing is not marked as cross-listed, so nothing was changed. The closest live eBay listing is "%s" (item %s, SKU %s). End it only if it is the same item.'
                       % (e['title'][:70], e['ebayItemId'], e['sku'] or '?'), click='https://www.ebay.com/itm/' + e['ebayItemId'], key='unear:' + mid, high=True)
             return True
-        if near_alert: self.note('  Vinted sale: "%s" - no live eBay listing has this title (checked %d), nothing to do' % (name, len(self.links.live)))
+        self.note('  Vinted sale: "%s" - not marked as cross-listed and no live eBay listing has this title (checked %d), nothing to do' % (name, len(self.links.live)))
         return True
 
     def unlinked_ebay_sale(self, oid, iid, title):
-        """An eBay sale of an item Mojonator has not linked to Vinted.  Look for an active Vinted listing with the same title."""
+        """An eBay sale of an item not marked as cross-listed.  Alert only (see above): names active Vinted listings with the same title."""
         ward = [w for w in self.wardrobe() if not w.get('closed') and not w.get('hidden')]
         if not ward: return False
         pick, exact, near = twins(title, ward, sku_hint=self.links.sku_of.get(str(iid), ''))
-        if pick:
-            vid = str(pick['id'])
-            rec = {'id': 'w:' + vid, 'title': pick['title'], 'location': self.links.sku_of.get(str(iid), ''), 'ebayItemId': str(iid), 'vintedId': vid,
-                   'vintedUrl': pick.get('url') or ('https://www.vinted.com/items/' + vid), 'vintedStatus': 'active', 'crossStatus': '', 'status': 'listed', 'account': 'A', 'unmarked': True}
-            self.note('eBay order %s: %s - not linked in Mojonator, but the same title is active on Vinted (%s): treating it as cross-listed' % (oid, title[:60], vid))
-            self.sold_on('ebay', rec, oid)
-            if self.live and not self.backup:
-                self.tell('Hiding on Vinted: ' + title[:60], 'Sold on eBay (order %s). It was not marked as cross-listed in Mojonator, but the same title is active on Vinted, so that listing is being hidden. If it is a second copy, un-hide it.' % oid, click=rec['vintedUrl'], key='uhide:' + vid)
-            return True
-        if exact:
-            self.tell('Hide on Vinted: ' + title[:60], 'Sold on eBay (order %s). %d active Vinted listings have this exact title. Hide the right one.' % (oid, len(exact)),
-                      click=exact[0].get('url') or 'https://www.vinted.com/member/3201332793', key='wamb:%s:%s' % (oid, iid), high=True)
-            return True
-        if near:
-            sc, w = near[0]
-            self.tell('Check eBay sale: ' + title[:60], 'Sold on eBay (order %s). Not marked as cross-listed, but this Vinted listing looks like it: "%s". Hide it if it is the same item.' % (oid, (w.get('title') or '')[:70]),
-                      click=w.get('url') or 'https://www.vinted.com/member/3201332793', key='wnear:%s:%s' % (oid, iid), high=True)
-            return True
-        return False
+        hit = exact[0] if exact else (near[0][1] if near else None)
+        if not hit: return False
+        if not self.dry: log('eBay order %s: %s (item %s) - NOT marked as cross-listed; Vinted listing with %s title: %s - alert only, nothing changed' % (oid, title[:60], iid, 'the same' if exact else 'a similar', hit.get('id')))
+        self.tell('Sold on eBay - on Vinted too? ' + title[:60], 'eBay order %s. This item is not marked as cross-listed, so nothing was changed. %s: "%s". Hide it only if it is the same item.'
+                  % (oid, ('%d active Vinted listings have the same title, e.g.' % len(exact)) if len(exact) > 1 else ('An active Vinted listing has the same title' if exact else 'The closest active Vinted listing is'), (hit.get('title') or '')[:70]),
+                  click=hit.get('url') or 'https://www.vinted.com/member/3201332793', key='wtwin:%s:%s' % (oid, iid), high=True)
+        return True
 
     # ---- checks
     def check_ebay(self, baseline=False, days=None):
@@ -635,11 +602,7 @@ class Service:
             self.note('Vinted sale email: %s' % name)
             recs = self.links.for_photo_codes(m['codes'])
             unmatched = [c for c in m['codes'] if not self.links.by_photo.get(c)]
-            for rec in recs:
-                self.sold_on('vinted', rec, m['id'])
-                # 0.3.0: the linked eBay listing is handled above.  A DIFFERENT live eBay listing with the very same title is either a
-                # second copy or the same item listed twice - it is taken off sale too (and Doug is told), see same_title_twins.
-                self.unlinked_vinted_sale(rec['title'] + ((' - ' + rec['location']) if rec['location'] and not split_sku(rec['title'])[1] else ''), m['id'], near_alert=False)
+            for rec in recs: self.sold_on('vinted', rec, m['id'])
             if unmatched:
                 # fall back to an exact title match before bothering Doug
                 left = []
@@ -772,7 +735,7 @@ def make_handler(svc):
                         save_json(WARD_FILE, {'at': iso(), 'items': items}); svc.state['wardrobe_at'] = now()
                     for u in body.get('unsure') or []:  # Mojonator could not tell which eBay listing a new Vinted listing belongs to
                         opts = ', '.join('%s %s' % (e.get('ebayItemId'), e.get('sku') or '') for e in (u.get('ebay') or [])[:4])
-                        svc.alerts.send('Is this cross-listed? ' + str(u.get('title') or '')[:55], 'This Vinted listing has the same title as live eBay listing(s) %s but the SKU does not match, so it is NOT marked as cross-listed. If it is the same item, link it in Mojonator (Vinted, Needs confirmation) or end one of them.' % opts,
+                        svc.alerts.send('Is this cross-listed? ' + str(u.get('title') or '')[:55], 'A Vinted listing has the same title as live eBay listing(s) %s. It is NOT marked as cross-listed and the program will not act on it. If it is the same item, link it in Mojonator (Vinted, Needs confirmation) or tell Claude.' % opts,
                                         click='https://www.vinted.com/items/' + str(u.get('vintedId')), key='unsure:' + str(u.get('vintedId')), repeat_hours=24 * 365)
                     r = body.get('sync')
                     if r: log('Mojonator Vinted sync by the browser helper: %s' % str(r)[:300])

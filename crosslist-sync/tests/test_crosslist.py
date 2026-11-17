@@ -168,37 +168,29 @@ assert len(lv) > 300, len(lv)
 titles = {}
 for e in lv: titles.setdefault(X.norm_title(e['title']), []).append(e)
 solo = [v[0] for v in titles.values() if len(v) == 1 and not X.split_sku(v[0]['title'])[1]]
-L1, L2, L3 = solo[0], solo[1], solo[2]
-# 1. unlinked Vinted sale, same title + same SKU live on eBay -> taken off eBay, Doug told
+L1, L2 = solo[0], solo[1]
+# 0.3.1 RULE: a title match NEVER changes anything - it is only an alert naming the eBay listing.
+# 1. unmarked Vinted sale, same title + same SKU live on eBay -> alert, eBay untouched
 s.mail.raws.append(vinted_mail('<u1@v>', L1['title'] + ' - ' + (L1['sku'] or 'ZZ'), '09_0aaaa_UnknownCodeAAAAAAAAAAAAAAAA')); s.cycle()
-assert s.ebay.zeroed == [L1['ebayItemId']], s.ebay.zeroed
-assert any(a[0].startswith('Took it off eBay') and 'second copy' not in a[1] for a in sent), sent
-# 2. same title, DIFFERENT SKU (the 2026-11-17 Queen case: Vinted says A4, the live eBay listing is A3) -> still taken off, with the second-copy note
+assert not s.ebay.zeroed and len(sent) == 1 and sent[0][0].startswith('Sold on Vinted - on eBay too?') and L1['ebayItemId'] in sent[0][1], sent
+# 2. same title, different SKU (the 2026-11-17 Queen case) -> alert, eBay untouched
 del sent[:]
 s.mail.raws.append(vinted_mail('<u2@v>', L2['title'] + ' - QQ9', '09_0bbbb_UnknownCodeBBBBBBBBBBBBBBBB')); s.cycle()
-assert s.ebay.zeroed[-1] == L2['ebayItemId'] and any(a[0].startswith('Took it off eBay') and 'second copy' in a[1] for a in sent), sent
+assert not s.ebay.zeroed and len(sent) == 1 and L2['ebayItemId'] in sent[0][1], sent
 # 3. nothing like it on eBay -> no alert at all (Vinted-only item)
-del sent[:]; n0 = len(s.ebay.zeroed)
+del sent[:]
 s.mail.raws.append(vinted_mail('<u3@v>', 'Zzyzx Qwfp Plugh Xyzzy Cassette 1901 - A4', '09_0cccc_UnknownCodeCCCCCCCCCCCCCCCC')); s.cycle()
-assert len(s.ebay.zeroed) == n0 and not sent, sent
-# 4. same_title_twins = alert -> not touched, Doug asked
-s.cfg['same_title_twins'] = 'alert'
-s.mail.raws.append(vinted_mail('<u4@v>', L3['title'], '09_0dddd_UnknownCodeDDDDDDDDDDDDDDDD')); s.cycle()
-assert len(s.ebay.zeroed) == n0 and any(a[0].startswith('End on eBay?') for a in sent), sent
-# 5. watch mode never changes anything
-s = make('watch'); s.mail.raws.append(vinted_mail('<u5@v>', L1['title'], '09_0eeee_UnknownCodeEEEEEEEEEEEEEEEE')); s.cycle()
-assert not s.ebay.zeroed and any(a[0].startswith('Sold on Vinted') for a in sent), sent
-# 6. unlinked eBay sale whose title is active on Vinted (from the helper's wardrobe) -> Vinted hide queued
+assert not s.ebay.zeroed and not sent, sent
+# 4. unmarked eBay sale whose title is active on Vinted -> alert, nothing queued for hiding
 s = make('live')
 X.save_json(X.WARD_FILE, {'at': X.iso(), 'items': [{'id': '777', 'title': 'Some Unlinked Album CD 1999 - GBA', 'closed': False, 'hidden': False, 'url': 'https://www.vinted.com/items/777', 'codes': []},
                                                    {'id': '778', 'title': 'Closed One CD', 'closed': True, 'hidden': False, 'url': '', 'codes': []}]})
 s.ebay.orders = [('22-1', '2026-11-17T10:00:00.000Z', [('555000111', 'Some Unlinked Album CD 1999')]), ('22-2', '2026-11-17T10:00:00.000Z', [('555000112', 'Closed One CD')])]
 s.cycle()
-assert [q['vintedId'] for q in s.state['queue']] == ['777'], s.state['queue']
-# 7. backup: waits, then acts only if the main PC has not
-phone.clear(); b = makeb()
-b.mail.raws.append(vinted_mail('<u7@v>', L1['title'], '09_0ffff_UnknownCodeFFFFFFFFFFFFFFFF')); b.cycle()
-assert not b.ebay.zeroed
-age(b, 25); b.cycle()
-assert b.ebay.zeroed == [L1['ebayItemId']] and any(a[0].startswith('BACKUP took it off eBay') for a in sent), (b.ebay.zeroed, sent)
-print('unlinked-sale fallback ok')
+assert not s.state['queue'] and len(sent) == 1 and sent[0][0].startswith('Sold on eBay - on Vinted too?'), (s.state['queue'], sent)
+# 5. a MARKED item still acts at once, and a second live eBay listing with the same title is left alone
+s = make('live'); s.state['browser_seen'] = time.time()
+s.links.live.append({'id': 'dup', 'title': B['title'], 'sku': 'ZZ', 'ebayItemId': '999000999'})
+s.mail.raws = [vinted_mail('<u5@v>', B['title'], codeB)]; s.cycle()
+assert s.ebay.zeroed == [str(B['ebayItemId'])] and not sent, (s.ebay.zeroed, sent)
+print('unmarked-sale alerts ok (nothing changed on a title match)')

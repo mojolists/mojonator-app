@@ -44,29 +44,28 @@ Easiest set-up: copy the main PC's `config.json` unchanged and start the program
 (`crosslist-sync.exe --backup --live`). In the backup role the program ignores `healthcheck_url` and pings only
 `backup_healthcheck_url` (blank by default).
 
-## 0.3.0 (2026-11-17) - cross-listed items are marked without anyone running a sync
+## 0.3.1 (2026-11-17) - only MARKED items are ever changed; marks come from exact ids
 
-What went wrong: a cassette sold on Vinted while the same title was live on eBay. The program only knew a Vinted listing through
-its link in Mojonator, and Mojonator's Vinted sync had not run since Nov 8, so every listing made after that was unknown to it and
-a sale only produced a "Check Vinted sale" alert.
+What went wrong: a cassette sold on Vinted while the same title was live on eBay. The program only knows a Vinted listing through
+its link in Mojonator, and Mojonator's Vinted sync had not run since Nov 8, so listings made after that - including 9 CDs that
+really were cross-listed - were unknown to it.
 
-What changed:
+The rule (Doug, 2026-11-17): **a matching title is never proof.** The same title is often another copy, another condition, or a
+multi-quantity listing (the Criterion Princess Bride). The program must KNOW which item is cross-listed.
 
-1. **Marking.** The Chrome helper (`vinted-hider.user.js` 0.3.0) reads the Vinted profile every 15 minutes from the always-open
-   Vinted tab. When anything changed it runs Mojonator's own Vinted sync and saves `data.json` (GitHub token from this program's
-   `config.json`, handed over on 127.0.0.1 only). A new Vinted listing whose title - minus the ` - SKU` tail - is exactly the title of
-   one live eBay item with the same SKU is linked to that item and marked **eBay + Vinted** at once. No sync has to be run by hand,
-   whoever made the listing. The backup PC gives the main PC 20 minutes first. Nothing is written at :12-:30 past the hour.
-2. **Safety net.** A sale Mojonator has not linked is no longer just an alert:
-   - Vinted sale: the live eBay listings are searched for the exact title. One hit -> quantity 0 on eBay and a "Took it off eBay"
-     alert. If the Vinted title says one SKU and the eBay listing another, the alert says so (it may be a second copy - put the
-     quantity back to 1). Several hits and the SKU does not settle it, or only a near match -> alert naming the eBay item(s).
-     Nothing with that title on eBay -> log line only, no alert.
-   - eBay sale: the active Vinted listings (from the helper) are searched the same way and the twin is hidden.
-   - A linked Vinted sale also checks for a second live eBay listing with the very same title and treats it the same way.
-   - `"same_title_twins": "alert"` in `config.json` turns the automatic quantity-0 on title-only matches into an alert.
-3. **"Is this cross-listed?"** alert when a new Vinted listing has the same title as a live eBay listing but a different SKU, so it
-   could not be marked.
+1. **A mark is an exact pair**: eBay item number <-> Vinted listing id, recorded when the listing is made.
+   - Listing runs: the runner records the pair; `node tools/mark-run.js data.json pairs.json` writes it into Mojonator right
+     after the run (required step, see tools/README.md), and the Chrome helper on the PC where the run was made does the same
+     within 15 minutes as a second line.
+   - The Chrome helper (`vinted-hider.user.js` 0.3.1) runs Mojonator's Vinted sync from the always-open Vinted tab every 15
+     minutes when Vinted changed (GitHub token from this program's `config.json`, 127.0.0.1 only), so Mojonator no longer
+     depends on anyone running a sync. Never at :12-:30 past the hour. The backup PC gives the main PC 20 minutes first.
+2. **Only marked items are acted on.** Vinted sale of a marked item -> its eBay listing goes to quantity 0. eBay sale of a marked
+   item -> its Vinted listing is hidden. Nothing else is ever ended or hidden.
+3. **Unmarked sale, same title live on the other site -> alert only**, naming the listing(s): "Sold on Vinted - on eBay too?" /
+   "Sold on eBay - on Vinted too?". Doug decides. No title on the other site -> log line, no alert.
+4. **"Is this cross-listed?"** - once per new Vinted listing whose title is also live on eBay and that has no mark (e.g. listed by
+   hand). Link it in Mojonator (Vinted, Needs confirmation) or tell Claude; until then the program will not touch it.
 
 Updating a PC: replace `crosslist-sync.exe` (close the window first, start it again after), and let Tampermonkey update the helper
 (or open `vinted-hider.user.js` from GitHub once and press Update). `/status` shows `version`, `live_ebay_unlinked`, `vinted_seen`.
