@@ -80,10 +80,16 @@ print('watch mode ok')
 s = make('live'); s.state['browser_seen'] = time.time(); s.ebay.orders = X.parse_orders(ORDERS_XML % A['ebayItemId']); s.cycle()
 assert [q['vintedId'] for q in s.state['queue']] == [str(A['vintedId'])] and not sent
 s.mail.raws = [vinted_mail('<n2@v>', B['title'], X.PHOTO_RE.search(B['vintedPhotos'][0]).group(1))]; s.state['browser_seen'] = time.time(); s.cycle()
-assert s.ebay.zeroed == [str(B['ebayItemId'])] and not sent
+# 0.3.2: a handled sale always says so (normal priority) - silence is never the 'it worked' signal
+assert s.ebay.zeroed == [str(B['ebayItemId'])] and len(sent) == 1 and sent[0][0].startswith('Sold on Vinted, off eBay: ') and (B.get('location') or '?') in sent[0][1], sent
+s.cycle(); assert len(sent) == 1, 'said once only'
+del sent[:]
 # hide not confirmed for 31 min -> alert once
 s.state['queue'][0]['queued'] -= 31 * 60; s.state['browser_seen'] = time.time(); s.check_queue(); s.check_queue()
 assert len(sent) == 1 and sent[0][0].startswith('Hide on Vinted')
+# 0.3.2: notify_success off -> a handled sale is quiet again
+q = make('live'); q.cfg['notify_success'] = False; q.state['browser_seen'] = time.time()
+q.mail.raws = [vinted_mail('<n2q@v>', B['title'], X.PHOTO_RE.search(B['vintedPhotos'][0]).group(1))]; q.cycle(); assert q.ebay.zeroed and not sent, sent
 # browser silent -> alert
 s.state['browser_seen'] = time.time() - 3600; s.started -= 3600; s.check_queue(); assert sent[-1][0].startswith('Vinted browser')
 print('live mode ok')
@@ -114,11 +120,17 @@ def makeb():
 def age(b, mins):
     for k in b.state.get('first_seen', {}): b.state['first_seen'][k] -= mins * 60
 codeB = X.PHOTO_RE.search(B['vintedPhotos'][0]).group(1)
-# Vinted sale, main PC did its job (eBay already at 0): backup waits, then does nothing and says nothing
+# Vinted sale, main PC did its job (eBay already at 0): backup waits, then changes nothing.
+# 0.3.2: it confirms the sale was handled ONLY when the main PC did not already send that same confirmation
 b = makeb(); b.mail.raws = [vinted_mail('<b1@v>', B['title'], codeB)]; b.cycle()
 assert not b.ebay.zeroed and not sent and not b.state['sold'], 'backup must wait'
 b.ebay.items[str(B['ebayItemId'])] = {'id': str(B['ebayItemId']), 'status': 'Active', 'available': 0, 'title': ''}
-age(b, 21); b.state['browser_seen'] = time.time(); b.cycle(); assert not b.ebay.zeroed and not sent, sent
+age(b, 21); b.state['browser_seen'] = time.time(); b.cycle()
+assert not b.ebay.zeroed and len(sent) == 1 and sent[0][0].startswith('Sold on Vinted, off eBay: '), sent
+b = makeb(); b.mail.raws = [vinted_mail('<b1b@v>', B['title'], codeB)]; b.cycle()
+b.ebay.items[str(B['ebayItemId'])] = {'id': str(B['ebayItemId']), 'status': 'Active', 'available': 0, 'title': ''}
+phone.add('Sold on Vinted, off eBay: ' + X.html.unescape(B['title'])[:45]); age(b, 21); b.state['browser_seen'] = time.time(); b.cycle(); assert not b.ebay.zeroed and not sent, sent
+phone.clear()
 # Vinted sale, main PC did nothing: backup zeroes eBay after the delay and alerts
 b = makeb(); b.mail.raws = [vinted_mail('<b2@v>', B['title'], codeB)]; b.cycle(); age(b, 10); b.cycle(); assert not b.ebay.zeroed
 age(b, 11); b.state['browser_seen'] = time.time(); b.cycle()
@@ -137,7 +149,10 @@ def post(b, body):
     r = urllib.request.Request('http://127.0.0.1:%d/done' % srv.server_address[1], data=json.dumps(body).encode(), headers={'Content-Type': 'application/json'})
     urllib.request.urlopen(r, timeout=5).read(); srv.server_close()
 post(b, {'vintedId': str(A['vintedId']), 'ok': True, 'acted': False, 'detail': 'hidden'})
-assert b.state['queue'][0]['done'] and not sent, sent
+assert b.state['queue'][0]['done'] and len(sent) == 1 and sent[0][0].startswith('Sold on eBay, off Vinted: '), sent
+b = makeb(); b.ebay.orders = X.parse_orders(ORDERS_XML % A['ebayItemId']); b.cycle(); age(b, 21); b.cycle()
+phone.add('Sold on eBay, off Vinted: ' + X.html.unescape(A['title'])[:45]); post(b, {'vintedId': str(A['vintedId']), 'ok': True, 'acted': False, 'detail': 'hidden'}); assert not sent, sent
+phone.clear()
 b = makeb(); b.ebay.orders = X.parse_orders(ORDERS_XML % A['ebayItemId']); b.cycle(); age(b, 21); b.cycle()
 post(b, {'vintedId': str(A['vintedId']), 'ok': True, 'acted': True, 'detail': 'hidden'})
 assert len(sent) == 1 and sent[0][0].startswith('BACKUP hid it on Vinted'), sent
@@ -147,7 +162,7 @@ phone.add('Check Vinted sale: Some brand new listing'); b.cycle(); age(b, 21); b
 phone.clear(); b = makeb(); b.mail.raws = [vinted_mail('<b5@v>', 'Some brand new listing', '01_00abc_ZZZZZZZZZZZZZZZZZZZZZZZZ')]; b.cycle(); age(b, 21); b.cycle()
 assert not sent, sent  # 0.3.0: nothing on eBay has that title, so there is nothing to tell
 # main role is unchanged by all this: acts at once
-s = make('live'); s.state['browser_seen'] = time.time(); s.mail.raws = [vinted_mail('<b6@v>', B['title'], codeB)]; s.cycle(); assert s.ebay.zeroed == [str(B['ebayItemId'])] and not sent
+s = make('live'); s.state['browser_seen'] = time.time(); s.mail.raws = [vinted_mail('<b6@v>', B['title'], codeB)]; s.cycle(); assert s.ebay.zeroed == [str(B['ebayItemId'])] and len(sent) == 1 and sent[0][0].startswith('Sold on Vinted, off eBay: '), sent
 print('backup role ok')
 print('ALL PASS')
 
@@ -192,5 +207,5 @@ assert not s.state['queue'] and len(sent) == 1 and sent[0][0].startswith('Sold o
 s = make('live'); s.state['browser_seen'] = time.time()
 s.links.live.append({'id': 'dup', 'title': B['title'], 'sku': 'ZZ', 'ebayItemId': '999000999'})
 s.mail.raws = [vinted_mail('<u5@v>', B['title'], codeB)]; s.cycle()
-assert s.ebay.zeroed == [str(B['ebayItemId'])] and not sent, (s.ebay.zeroed, sent)
+assert s.ebay.zeroed == [str(B['ebayItemId'])] and len(sent) == 1 and sent[0][0].startswith('Sold on Vinted, off eBay'), (s.ebay.zeroed, sent)
 print('unmarked-sale alerts ok (nothing changed on a title match)')

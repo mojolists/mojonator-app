@@ -44,6 +44,14 @@ Easiest set-up: copy the main PC's `config.json` unchanged and start the program
 (`crosslist-sync.exe --backup --live`). In the backup role the program ignores `healthcheck_url` and pings only
 `backup_healthcheck_url` (blank by default).
 
+## 0.3.2 (2026-11-18) - a handled sale always says so
+
+Before this, a cross-listed sale that was handled correctly produced no alert at all, so silence could mean "handled" or
+"never seen". Now every handled sale sends one normal-priority alert with the item's location:
+`Sold on Vinted, off eBay: <title>` or `Sold on eBay, off Vinted: <title>`. The backup PC sends the same confirmation
+20 minutes later only if the main PC has not already sent it (so it also covers a main PC on an older version).
+Problems still arrive as high-priority alerts. `"notify_success": false` in config.json turns the confirmations off.
+
 ## 0.3.1 (2026-11-17) - only MARKED items are ever changed; marks come from exact ids
 
 What went wrong: a cassette sold on Vinted while the same title was live on eBay. The program only knows a Vinted listing through

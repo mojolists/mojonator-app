@@ -23,7 +23,7 @@ import urllib.error, urllib.parse, urllib.request
 from email.message import EmailMessage
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = '0.3.1'
+VERSION = '0.3.2'
 BASE = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__))
 CONFIG_FILE = os.path.join(BASE, 'config.json')
 STATE_FILE = os.path.join(BASE, 'state.json')
@@ -48,6 +48,7 @@ DEFAULT_CONFIG = {
     'pc_name': '',                         # shown in alerts; blank = 'X51' for main, 'backup PC' for backup
     'backup_healthcheck_url': '',          # backup role pings this one, never healthcheck_url
     'backup_pc_name': 'data PC',
+    'notify_success': True,                # 0.3.2: also send a (normal priority) alert when a cross-listed sale WAS handled
 }
 
 PHOTO_RE = re.compile(r'images\d*\.vinted\.net/t[a-z]*/(\d+_[0-9a-fA-F]+_[A-Za-z0-9]+)/')
@@ -464,6 +465,14 @@ class Service:
                 log('alert not repeated (already sent by the main PC): %s' % title); return
         self.alerts.send(title, body, click=click, key=key, high=high)
 
+    # ---- 0.3.2 (Doug 2026-11-18): silence must never be the 'it worked' signal - every handled cross-listed sale says so.
+    #      The backup PC uses the same titles, so tell() drops its copy when the main PC already sent it, and sends it
+    #      when the main PC did not (e.g. an older version there).
+    def ok_note(self, site, rec_title, body, click, rid):
+        if not self.live or not self.cfg.get('notify_success', True): return
+        head = 'Sold on Vinted, off eBay: ' if site == 'vinted' else 'Sold on eBay, off Vinted: '
+        self.tell(head + (rec_title or '')[:45], body, click=click, key='ok-%s:%s' % (site, rid))
+
     # ---- an item sold on one site
     def sold_on(self, site, rec, ref):
         other = 'vinted' if site == 'ebay' else 'ebay'
@@ -478,7 +487,9 @@ class Service:
 
     def hide_on_vinted(self, rec):
         if rec['vintedStatus'] in ('sold', 'removed', 'hidden'):
-            self.note('  eBay sale: "%s" - Vinted listing already %s, nothing to do' % (rec['title'][:60], rec['vintedStatus'])); return
+            self.note('  eBay sale: "%s" - Vinted listing already %s, nothing to do' % (rec['title'][:60], rec['vintedStatus']))
+            self.ok_note('ebay', rec['title'], 'Sold on eBay. The Vinted listing was already %s. Location %s.' % (rec['vintedStatus'], rec['location'] or '?'), rec['vintedUrl'], rec['id'])
+            return
         if self.live:
             with lock:
                 self.state['queue'].append({'vintedId': rec['vintedId'], 'title': rec['title'], 'url': rec['vintedUrl'], 'location': rec['location'], 'queued': now(), 'done': False, 'alerted': False, 'ebayId': rec['ebayItemId']})
@@ -498,7 +509,9 @@ class Service:
                       click='https://www.ebay.com/itm/' + rec['ebayItemId'], key='chk:' + rec['id'], high=True); return 'unchecked'
         link = 'https://www.ebay.com/itm/' + st['id']
         if st['available'] < 1:
-            self.note('  Vinted sale: "%s" - eBay listing %s not for sale (%s), nothing to do%s' % (rec['title'][:60], st['id'], st['status'], ' (the main PC or you already handled it)' if self.backup else '')); return 'already'
+            self.note('  Vinted sale: "%s" - eBay listing %s not for sale (%s), nothing to do%s' % (rec['title'][:60], st['id'], st['status'], ' (the main PC or you already handled it)' if self.backup else ''))
+            self.ok_note('vinted', rec['title'], 'Sold on Vinted. The eBay listing is off sale (%s, 0 available)%s. Location %s.' % (st['status'], ' - checked by the %s' % self.pc if self.backup else '', rec['location'] or '?'), link, rec['id'])
+            return 'already'
         if self.live:
             try:
                 res = self.ebay.zero(st['id']); after = self.ebay.item_state(st['id'], follow=0)
@@ -507,6 +520,8 @@ class Service:
                 self.act('zero-ebay', rec, st['id'], res)
                 if self.backup:
                     self.tell('BACKUP took it off eBay: ' + rec['title'][:50], 'Sold on Vinted. The X51 had not taken it off eBay after %d min, so the %s did (%s). Check the X51.' % (float(self.cfg.get('backup_delay_minutes', 20)), self.pc, res), click=link, key='bzero:' + rec['id'], high=True)
+                else:
+                    self.ok_note('vinted', rec['title'], 'Sold on Vinted. eBay listing set to out of stock and checked. Location %s.' % (rec['location'] or '?'), link, rec['id'])
                 return 'zeroed'
             except Exception as e:
                 self.act('zero-ebay', rec, st['id'], 'FAILED ' + str(e)[:150])
@@ -714,6 +729,8 @@ def make_handler(svc):
                             record_action('hide-vinted', x['title'], x.get('ebayId', ''), vid, ('hidden (checked)' if acted else 'already off sale') if good else 'FAILED ' + str(body.get('detail') or '')[:150])
                             if good and acted and svc.backup:
                                 svc.alerts.send('BACKUP hid it on Vinted: ' + x['title'][:50], 'Sold on eBay. The X51 had not hidden it on Vinted, so the %s did. Check the X51.' % svc.pc, click=x['url'], high=True)
+                            elif good:
+                                svc.ok_note('ebay', x['title'], 'Sold on eBay. Vinted listing %s. Location %s.' % ('hidden and checked' if acted else 'is off sale (checked by the %s)' % svc.pc, x.get('location') or '?'), x['url'], vid)
                             if not good and not x.get('alerted'):
                                 x['alerted'] = True
                                 svc.alerts.send('Hide on Vinted: ' + x['title'][:60], 'Sold on eBay. The automatic hide failed (%s). Hide or delete it on Vinted.' % str(body.get('detail') or '')[:100], click=x['url'], high=True)
