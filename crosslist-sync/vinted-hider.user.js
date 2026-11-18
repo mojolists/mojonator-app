@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         Mojo Crosslist - Vinted hider
 // @namespace    https://mojolists.com/
-// @version      0.3.1
+// @version      0.3.2
 // @description  Hides a Vinted listing when the Crosslist Sync program on this PC says its twin sold on eBay, and keeps Mojonator's Vinted links and cross-listed marks up to date.
 // @match        https://www.vinted.com/*
 // @grant        GM_xmlhttpRequest
 // @connect      127.0.0.1
 // @connect      api.github.com
-// @require      https://mojolists.com/mojonator-app/vinted-merge.js?v=139
+// @require      https://mojolists.com/mojonator-app/vinted-merge.js?v=140
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/mojolists/mojonator-app/main/crosslist-sync/vinted-hider.user.js
 // @downloadURL  https://raw.githubusercontent.com/mojolists/mojonator-app/main/crosslist-sync/vinted-hider.user.js

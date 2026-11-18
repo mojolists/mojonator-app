@@ -18,7 +18,7 @@
        orders:[{txId,title,price,date,status}], runner:[{vintedId,ebayItemId,title,price,listedAt}] } */
 (function (root) {
   'use strict';
-  var VERSION = 'v6'; // v6: a title match is never a link - only exact eBay item numbers are (2026-11-17); v5: syncAll() marks cross-listed items at once (MOJO_VINTED_V5_CROSSMARK); v2: listing photo URLs (vintedPhotos); v3: multi-copy items (quantity) split one copy per Vinted listing; v4: cross-listed items (crossStatus, MOJO_SYNC_V7_CROSSLIST)
+  var VERSION = 'v7'; // v7: a Vinted-only listing (Mojo Lister Vinted checkbox) is ALWAYS its own new item, made before any title matching, and syncAll never auto-links by title (MOJO_VINTED_V7_NEWITEM, Doug 2026-11-18: a newly listed item is not the one that already exists); v6: a title match is never a link - only exact eBay item numbers are (2026-11-17); v5: syncAll() marks cross-listed items at once (MOJO_VINTED_V5_CROSSMARK); v2: listing photo URLs (vintedPhotos); v3: multi-copy items (quantity) split one copy per Vinted listing; v4: cross-listed items (crossStatus, MOJO_SYNC_V7_CROSSLIST)
   var STOP = {}; 'cd cds dvd dvds blu ray bluray the of a an and with new like good very used disc discs edition lot in to for by on movie movies album'.split(' ').forEach(function (w) { STOP[w] = 1; });
 
   function toks(s) {
@@ -364,8 +364,29 @@
   }
   function syncAll(data, snap, opts) {
     var pre = {}; data.items.forEach(function (it) { pre[it.id] = { account: it.account, status: it.status, askingPrice: it.askingPrice, listedDate: it.listedDate, quantity: it.quantity, ebayItemId: it.ebayItemId }; });
-    var prep = crossPrep(data, snap);
-    var rep = merge(data, snap, opts);
+    var prep = crossPrep(data, snap), rep0 = new Date().toISOString();
+    /* MOJO_VINTED_V7_NEWITEM: every Vinted-only listing becomes its own record right here, before merge() looks at titles.
+       It is a new physical item - never the eBay listing (live, ended or sold) that happens to carry the same title. */
+    var haveV = {}; data.items.forEach(function (it) { if (it.vintedId) haveV[String(it.vintedId)] = 1; });
+    var wById = {}; (snap.wardrobe || []).forEach(function (L) { wById[String(L.id)] = L; });
+    var newOwn = [];
+    (snap.vintedOnly || []).forEach(function (x) {
+      var vid = String(x.vintedId || ''); if (!vid || haveV[vid]) return; haveV[vid] = 1;
+      var L = wById[vid] || { id: vid, title: x.title, price: x.price, url: 'https://www.vinted.com/items/' + vid };
+      var it = newPending({ id: vid, title: L.title || x.title, url: L.url, listedAt: String(x.listedAt || L.listedAt || '').slice(0, 10) || today() }, [], '', rep0);
+      it.vintedMatch = 'new'; it.vintedCandidates = ''; it.vintedNew = true;
+      it.vintedNote = 'New item listed on Vinted only - not any eBay listing with the same title';
+      it.listedDate = it.vintedListedDate; it.vintedStatus = 'active';
+      if (x.price != null && x.price !== '' && !isNaN(parseFloat(x.price))) { it.askingPrice = parseFloat(x.price); it.vintedPrice = it.askingPrice; }
+      if (x.sku) { it.sku = x.sku; it.location = x.sku; }
+      if (x.draftId) it.listerDraftId = String(x.draftId);
+      if (x.upc) it.upc = String(x.upc);
+      if (x.cost != null && x.cost !== '') it.cost = x.cost;
+      data.items.push(it); newOwn.push({ vintedId: vid, title: it.title, sku: it.sku || '' });
+    });
+    var o2 = {}; Object.keys(opts || {}).forEach(function (k) { o2[k] = opts[k]; });
+    if (o2.autoMatch === undefined) o2.autoMatch = false; // v7: a title match goes to the confirm queue, it is never a link
+    var rep = merge(data, snap, o2);
     var marked = [];
     data.items.forEach(function (it) {
       var p = pre[it.id]; if (!p) return;
@@ -382,7 +403,9 @@
       it.vintedMatch = 'confirmed'; it.vintedCandidates = ''; it.vintedNote = '';
       var l = vo[String(it.vintedId)]; if (l.sku && !it.sku) { it.sku = l.sku; it.location = l.sku; }
     });
-    rep.crossMarked = marked; rep.unsure = prep.unsure;
+    var ownIds = {}; newOwn.forEach(function (n) { ownIds[n.vintedId] = 1; }); (snap.vintedOnly || []).forEach(function (x) { ownIds[String(x.vintedId)] = 1; });
+    rep.newOwn = newOwn; if (newOwn.length) rep.changed = true;
+    rep.crossMarked = marked; rep.unsure = (prep.unsure || []).filter(function (u) { return !ownIds[String(u.vintedId)]; }); // a known new item is not a 'maybe cross-listed' question
     if (marked.length) rep.changed = true;
     return rep;
   }

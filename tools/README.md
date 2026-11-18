@@ -43,6 +43,7 @@ If Vinted shows a check page, the runner stops itself — clear it in the browse
 Drafts with Mojo Lister's **Vinted** box checked never go in the eBay file. Upload All hosts their photos on eBay
 Picture Services and writes a `vinted-*.json` job file (copy in `Mojo Lister\data\exports\`). Doug says when to list.
 - Jobs carry `vintedOnly: true` + `draftId` — no eBay listing, so no ebayQty check and nothing to end on eBay.
+- REQUIRED last step for these too: put each one in the mark-run file as `{ "vintedOnly": true, "vintedId", "draftId", "sku", "upc", "title", "price", "cost" }`. Mojonator then makes it its OWN new record (vinted-merge v7). A new item is never the eBay listing with the same title, even an identical tape - an identical copy going to eBay is handled by Doug raising that listing's quantity.
 - Price is exactly what Doug typed (no floor, no $4.99 math).
 - Conditions: Like New -> New without tags, Very Good -> Very good, Good -> Good, Brand New -> New with tags, Acceptable -> flagged.
 - Before `start()`: view each main photo against the title, check edition/UPC against the case photo, fill any
