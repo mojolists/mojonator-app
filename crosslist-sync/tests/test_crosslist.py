@@ -34,10 +34,11 @@ class FakeMail:
     def __init__(self): self.raws = []
     def sale_emails(self, days=3): return list(self.raws)
 
-def make(mode):
+def make(mode, every=False):
     for f in os.listdir(tmp): os.remove(os.path.join(tmp, f))
     del sent[:]
     cfg = json.loads(json.dumps(X.DEFAULT_CONFIG)); cfg['mode'] = mode; cfg['github']['local_file'] = data_path
+    assert cfg['notify_every_sale'] is True; cfg['notify_every_sale'] = every  # the older tests below run with the 0.3.3 'needed nothing' alerts off
     s = X.Service(cfg); s.ebay = FakeEbay(); s.mail = FakeMail()
     assert s.cycle()  # baseline
     return s
@@ -209,3 +210,35 @@ s.links.live.append({'id': 'dup', 'title': B['title'], 'sku': 'ZZ', 'ebayItemId'
 s.mail.raws = [vinted_mail('<u5@v>', B['title'], codeB)]; s.cycle()
 assert s.ebay.zeroed == [str(B['ebayItemId'])] and len(sent) == 1 and sent[0][0].startswith('Sold on Vinted, off eBay'), (s.ebay.zeroed, sent)
 print('unmarked-sale alerts ok (nothing changed on a title match)')
+
+
+# ---------------------------------------------------------------- 0.3.3: a sale that needed nothing says so too (both sites)
+s = make('live', every=True); s.state['browser_seen'] = time.time()
+X.save_json(X.WARD_FILE, {'at': X.iso(), 'items': [{'id': '777', 'title': 'Some Unlinked Album CD 1999 - GBA', 'closed': False, 'hidden': False, 'url': 'https://www.vinted.com/items/777', 'codes': []}]})
+# eBay sale, not cross-listed, nothing like it on Vinted -> one normal-priority note, nothing queued; said once
+s.ebay.orders = [('33-1', '2026-11-19T01:00:00.000Z', [('555000201', 'Terminator 3 Rise of the Machines Blu-ray 2003')])]; s.cycle()
+assert not s.state['queue'] and len(sent) == 1 and sent[0][0] == 'Sold on eBay, not cross-listed: ' + 'Terminator 3 Rise of the Machines Blu-ray 2003'[:45] and '1 active Vinted' in sent[0][1], sent
+s.cycle(); assert len(sent) == 1, sent
+# eBay sale, not marked but same title active on Vinted -> the high 'on Vinted too?' alert only, not both
+del sent[:]; s.ebay.orders.append(('33-2', '2026-11-19T01:00:00.000Z', [('555000202', 'Some Unlinked Album CD 1999')])); s.cycle()
+assert len(sent) == 1 and sent[0][0].startswith('Sold on eBay - on Vinted too?'), sent
+# a cross-listed eBay sale still gets its own handling, and the unmarked line item in the same batch gets the note
+del sent[:]; s.ebay.orders = X.parse_orders(ORDERS_XML % A['ebayItemId']); s.cycle()
+assert [q['vintedId'] for q in s.state['queue']] == [str(A['vintedId'])] and [t[0][:30] for t in sent] == ['Sold on eBay, not cross-listed'], sent
+# Vinted sale of something that is nowhere on eBay -> note, eBay untouched
+del sent[:]; s.mail.raws.append(vinted_mail('<e1@v>', 'Zzyzx Qwfp Plugh Xyzzy Cassette 1901 - A4', '09_0dddd_UnknownCodeDDDDDDDDDDDDDDDD')); s.cycle()
+assert not s.ebay.zeroed and len(sent) == 1 and sent[0][0].startswith('Sold on Vinted, not on eBay: '), sent
+# no wardrobe list from the browser yet -> the note says the Vinted side could not be checked
+s = make('live', every=True); s.state['browser_seen'] = time.time()
+s.ebay.orders = [('33-3', '2026-11-19T01:00:00.000Z', [('555000203', 'Another Plain Disc')])]; s.cycle()
+assert len(sent) == 1 and 'could not be checked' in sent[0][1], sent
+# watch mode stays quiet about these
+s = make('watch', every=True); s.ebay.orders = [('33-4', '2026-11-19T01:00:00.000Z', [('555000204', 'Watch Mode Disc')])]; s.cycle(); assert not sent, sent
+# backup: waits its delay, then sends the note only if the main PC has not
+phone.clear(); b = make('live', every=True); b.cfg['role'] = 'backup'; b.cfg['backup_delay_minutes'] = 20; b.state['browser_seen'] = time.time()
+b.ebay.orders = [('33-5', '2026-11-19T01:00:00.000Z', [('555000205', 'Backup Disc One')])]; b.cycle(); assert not sent, sent
+age(b, 21); b.cycle(); assert len(sent) == 1 and sent[0][0] == 'Sold on eBay, not cross-listed: Backup Disc One', sent
+b = make('live', every=True); b.cfg['role'] = 'backup'; b.cfg['backup_delay_minutes'] = 20; b.state['browser_seen'] = time.time()
+b.ebay.orders = [('33-6', '2026-11-19T01:00:00.000Z', [('555000206', 'Backup Disc Two')])]; b.cycle(); phone.add('Sold on eBay, not cross-listed: Backup Disc Two'); age(b, 21); b.cycle(); assert not sent, sent
+phone.clear()
+print('every-sale notes ok')

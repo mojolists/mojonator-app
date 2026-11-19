@@ -44,6 +44,16 @@ Easiest set-up: copy the main PC's `config.json` unchanged and start the program
 (`crosslist-sync.exe --backup --live`). In the backup role the program ignores `healthcheck_url` and pings only
 `backup_healthcheck_url` (blank by default).
 
+## 0.3.3 (2026-11-19) - every sale says something
+
+A sale that needed nothing is no longer silent, on either site, so a quiet phone never has to be read as "it worked":
+
+- `Sold on eBay, not cross-listed: <title>` - the eBay item is not marked as cross-listed and no active Vinted listing has its title.
+- `Sold on Vinted, not on eBay: <title>` - the Vinted item is not marked as cross-listed and no live eBay listing has its title.
+
+Normal priority, live mode only, sent once per sale. The backup PC sends the same title about 20 minutes later only if the main PC has not.
+`"notify_every_sale": false` in config.json turns these off (handled-sale confirmations and problem alerts are unaffected).
+
 ## 0.3.2 (2026-11-18) - a handled sale always says so
 
 Before this, a cross-listed sale that was handled correctly produced no alert at all, so silence could mean "handled" or

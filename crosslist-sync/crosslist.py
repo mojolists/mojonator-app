@@ -23,7 +23,7 @@ import urllib.error, urllib.parse, urllib.request
 from email.message import EmailMessage
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = '0.3.2'
+VERSION = '0.3.3'
 BASE = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__))
 CONFIG_FILE = os.path.join(BASE, 'config.json')
 STATE_FILE = os.path.join(BASE, 'state.json')
@@ -49,6 +49,7 @@ DEFAULT_CONFIG = {
     'backup_healthcheck_url': '',          # backup role pings this one, never healthcheck_url
     'backup_pc_name': 'data PC',
     'notify_success': True,                # 0.3.2: also send a (normal priority) alert when a cross-listed sale WAS handled
+    'notify_every_sale': True,             # 0.3.3: also say so when a sale needed nothing (item is on one site only)
 }
 
 PHOTO_RE = re.compile(r'images\d*\.vinted\.net/t[a-z]*/(\d+_[0-9a-fA-F]+_[A-Za-z0-9]+)/')
@@ -473,6 +474,13 @@ class Service:
         head = 'Sold on Vinted, off eBay: ' if site == 'vinted' else 'Sold on eBay, off Vinted: '
         self.tell(head + (rec_title or '')[:45], body, click=click, key='ok-%s:%s' % (site, rid))
 
+    # ---- 0.3.3 (Doug 2026-11-19): a sale that needed nothing says so too, on BOTH sites - otherwise a quiet night
+    #      cannot be told apart from a program that is not running.
+    def seen_note(self, site, title, body, rid, click=None):
+        if not self.live or not self.cfg.get('notify_every_sale', True): return
+        head = 'Sold on eBay, not cross-listed: ' if site == 'ebay' else 'Sold on Vinted, not on eBay: '
+        self.tell(head + (title or '')[:45], body, click=click, key='seen-%s:%s' % (site, rid))
+
     # ---- an item sold on one site
     def sold_on(self, site, rec, ref):
         other = 'vinted' if site == 'ebay' else 'ebay'
@@ -502,7 +510,9 @@ class Service:
 
     def zero_on_ebay(self, rec):
         if not rec['ebayItemId']:
-            self.note('  Vinted sale: "%s" - not on eBay, nothing to do' % rec['title'][:60]); return 'none'
+            self.note('  Vinted sale: "%s" - not on eBay, nothing to do' % rec['title'][:60])
+            self.seen_note('vinted', rec['title'], 'Sold on Vinted. Mojonator has it as a Vinted-only item, so there was nothing to take off eBay. Location %s.' % (rec.get('location') or '?'), rec['id'], rec.get('vintedUrl'))
+            return 'none'
         try: st = self.ebay.item_state(rec['ebayItemId'])
         except Exception as e:
             self.tell('Check eBay: ' + rec['title'][:60], 'Sold on Vinted, but the eBay listing could not be checked (%s). End it on eBay if it is live.' % str(e)[:120],
@@ -560,6 +570,7 @@ class Service:
                       % (e['title'][:70], e['ebayItemId'], e['sku'] or '?'), click='https://www.ebay.com/itm/' + e['ebayItemId'], key='unear:' + mid, high=True)
             return True
         self.note('  Vinted sale: "%s" - not marked as cross-listed and no live eBay listing has this title (checked %d), nothing to do' % (name, len(self.links.live)))
+        self.seen_note('vinted', title, 'Sold on Vinted. Not marked as cross-listed and no live eBay listing has this title (checked %d), so nothing was changed.' % len(self.links.live), mid)
         return True
 
     def unlinked_ebay_sale(self, oid, iid, title):
@@ -592,6 +603,10 @@ class Service:
                 if not recs:
                     if self.unlinked_ebay_sale(oid, iid, title): continue
                     if not self.dry: log('eBay order %s: %s (item %s) - not cross-listed, nothing to do' % (oid, title[:60], iid))
+                    ward = [w for w in self.wardrobe() if not w.get('closed') and not w.get('hidden')]
+                    self.seen_note('ebay', title, 'eBay order %s. Not marked as cross-listed%s, so nothing was changed. SKU %s.'
+                                   % (oid, (' and none of the %d active Vinted listings has this title' % len(ward)) if ward else ' (the Vinted listings could not be checked for the same title - no list from the browser helper yet)', self.links.sku_of.get(str(iid), '') or '?'),
+                                   key, 'https://www.ebay.com/itm/' + str(iid))
                     continue
                 if len(recs) > 1:
                     self.tell('Check sale: ' + title[:60], 'eBay order %s matches %d Mojonator records. Check Vinted by hand.' % (oid, len(recs)), key='amb:' + key, high=True); continue
