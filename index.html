@@ -217,7 +217,7 @@
       <a data-view="settings"><span class="ic">⚙</span> Settings</a>
       <a id="calcNav"><span class="ic">%</span> Price calc</a>
     </nav>
-    <div class="side-foot">Mojonator v1.0 (b137)<br><span id="syncFoot">Local · GitHub-sync ready</span></div>
+    <div class="side-foot">Mojonator v1.0 (b138)<br><span id="syncFoot">Local · GitHub-sync ready</span></div>
   </aside>
 
   <!-- Main -->
@@ -1523,9 +1523,9 @@ function vintedBookmarklet(){
 /* MOJO_B137_CROSSLIST: one disc live on eBay AND Vinted is ONE item. crossStatus (set by the eBay sync / Vinted sync):
    both · sold-ebay-pending-vinted-hide · sold-ebay · sold-vinted · double-sale. ebayStillLive = sold, but its eBay listing can still be bought. */
 const CROSS_LABEL={both:'eBay + Vinted','sold-ebay-pending-vinted-hide':'Sold on eBay — hide on Vinted','sold-ebay':'Sold on eBay','sold-vinted':'Sold on Vinted','double-sale':'SOLD ON BOTH'};
-function crossNeeds(it){ return it.crossStatus==='sold-ebay-pending-vinted-hide' || it.crossStatus==='double-sale' || it.ebayStillLive===true; }
+function crossNeeds(it){ return it.crossStatus==='sold-ebay-pending-vinted-hide' || it.crossStatus==='double-sale' || (it.ebayStillLive===true&&isSold(it)); } /* MOJO_B138_STILLLIVE: the flag only counts on an item that really sold — 14 live DVD bundles showed as "Sold on Vinted" (2026-11-19) */
 function crossPill(it){
-  if(it.ebayStillLive===true) return ' <span class="xpill warn" title="Sold, but its eBay listing is still live — end it on eBay">end on eBay</span>';
+  if(it.ebayStillLive===true&&isSold(it)) return ' <span class="xpill warn" title="Sold, but its eBay listing is still live — end it on eBay">end on eBay</span>';
   if(!it.crossStatus) return '';
   return ` <span class="xpill${crossNeeds(it)?' warn':''}" title="Cross-listed item">${esc(CROSS_LABEL[it.crossStatus]||it.crossStatus)}</span>`;
 }
