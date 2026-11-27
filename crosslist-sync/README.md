@@ -44,6 +44,18 @@ Easiest set-up: copy the main PC's `config.json` unchanged and start the program
 (`crosslist-sync.exe --backup --live`). In the backup role the program ignores `healthcheck_url` and pings only
 `backup_healthcheck_url` (blank by default).
 
+## 0.3.4 (2026-11-27) - Vinted bundles: every item comes off eBay
+A Vinted bundle sale email shows only its first item, so only that one came off eBay. Now three more signals catch
+every item of a Vinted sale, and each acts only on an exact Mojonator pair (listing-runner link, Doug-confirmed link,
+or marked live on both sites):
+- the Vinted order itself: the browser helper (vinted-hider 0.3.4) reads recent sales from Vinted's messages, with every
+  item id, and posts them to `/orders`. A sale email makes the program ask the helper for them at once (`want_orders`).
+- the Vinted profile: a listing the helper sees closed as sold.
+- Mojonator's own "sold on Vinted" mark (backstop, every cycle).
+Recent sales only (7 days). Already off eBay = recorded quietly. More than one copy left on eBay = alert, never zeroed.
+A title-only link = alert, never changed. More than 40 in one cycle = stop and alert. New file: vinted-orders.json.
+Mojonator (vinted-merge.js v8) reads sold orders from Vinted's messages too, since /api/v2/my_orders is gone.
+
 ## 0.3.3 (2026-11-19) - every sale says something
 
 A sale that needed nothing is no longer silent, on either site, so a quiet phone never has to be read as "it worked":

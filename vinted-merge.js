@@ -309,7 +309,8 @@
   function orderOf(cv, upd) {
     var t = cv && cv.transaction; if (!t || t.current_user_side !== 'seller') return null;
     var code = Number(t.status) || 0, ship = Number(t.shipment_status) || 0, msgs = cv.messages || [];
-    var ts = msgs.length && msgs[0].created_at_ts ? new Date(msgs[0].created_at_ts * 1000).toISOString() : String(upd || '');
+    var raw = msgs.length ? msgs[0].created_at_ts : null, ms = typeof raw === 'number' ? raw * 1000 : Date.parse(raw || ''); // Vinted sends an ISO time here
+    var ts = isNaN(ms) ? String(upd || '') : new Date(ms).toISOString();
     var ids = (t.item_ids && t.item_ids.length ? t.item_ids : (t.item_id ? [t.item_id] : [])).map(String);
     return { txId: String(t.id), title: t.item_title || '', price: t.offer_price && t.offer_price.amount, date: ts, itemIds: ids, count: Number(t.item_count) || ids.length,
       statusCode: code, sale: code >= 200 && code < 500, side: 'seller',
