@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         Mojonator Vinted Sync
 // @namespace    https://mojolists.com/mojonator-app/
-// @version      1.0.6
+// @version      1.0.7
 // @description  Reads your Vinted listings and sold orders and writes them into Mojonator's data.json (mojolists/mojonator) — Vinted channel.
 // @author       Mojolists
 // @match        https://www.vinted.com/*
-// @require      https://mojolists.com/mojonator-app/vinted-merge.js?v=140
+// @require      https://mojolists.com/mojonator-app/vinted-merge.js?v=141
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -17,7 +17,7 @@
 // ==/UserScript==
 /* MOJO_VINTED_SYNC_V1
    - Runs on vinted.com while you are signed in. Every 30 minutes (and on the ⟳ button) it reads
-     your profile listings (/api/v2/wardrobe/<id>/items) and sold orders (/api/v2/my_orders), merges
+     your profile listings (/api/v2/wardrobe/<id>/items) and sold orders (Vinted's messages - /api/v2/my_orders is gone since Nov 2026), merges
      them into data.json with vinted-merge.js, and saves with the GitHub token you pasted once.
    - Listing-runner records (localStorage __mojo_vinted_log, and the older __vrun "done" list) give
      exact eBay item number -> Vinted id links; they are picked up within a minute of a listing run.

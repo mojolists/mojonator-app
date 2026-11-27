@@ -6,7 +6,7 @@ from email.message import EmailMessage
 
 data_path = sys.argv[1]
 tmp = tempfile.mkdtemp()
-for n in ('STATE_FILE', 'LOG_FILE', 'ACTIONS_FILE', 'CACHE_FILE', 'WARD_FILE'): setattr(X, n, os.path.join(tmp, n))
+for n in ('STATE_FILE', 'LOG_FILE', 'ACTIONS_FILE', 'CACHE_FILE', 'WARD_FILE', 'ORDERS_FILE'): setattr(X, n, os.path.join(tmp, n))
 sent = []
 X.Alerts.send = lambda self, title, body, click=None, key=None, repeat_hours=6, high=False: sent.append((title, body, click)) or True
 
@@ -34,12 +34,13 @@ class FakeMail:
     def __init__(self): self.raws = []
     def sale_emails(self, days=3): return list(self.raws)
 
-def make(mode, every=False):
+def make(mode, every=False, backstop=False):
     for f in os.listdir(tmp): os.remove(os.path.join(tmp, f))
     del sent[:]
     cfg = json.loads(json.dumps(X.DEFAULT_CONFIG)); cfg['mode'] = mode; cfg['github']['local_file'] = data_path
     assert cfg['notify_every_sale'] is True; cfg['notify_every_sale'] = every  # the older tests below run with the 0.3.3 'needed nothing' alerts off
     s = X.Service(cfg); s.ebay = FakeEbay(); s.mail = FakeMail()
+    if not backstop: s.backstop = lambda: (0, 0)  # the older tests below run without the 0.3.4 backstop (today's real sales would trigger it)
     assert s.cycle()  # baseline
     return s
 
@@ -242,3 +243,90 @@ b = make('live', every=True); b.cfg['role'] = 'backup'; b.cfg['backup_delay_minu
 b.ebay.orders = [('33-6', '2026-11-19T01:00:00.000Z', [('555000206', 'Backup Disc Two')])]; b.cycle(); phone.add('Sold on eBay, not cross-listed: Backup Disc Two'); age(b, 21); b.cycle(); assert not sent, sent
 phone.clear()
 print('every-sale notes ok')
+
+
+# ---------------------------------------------------------------- 0.3.4: Vinted bundles - every item of the order comes off eBay
+data = json.load(open(data_path)); its = data['items']
+pairs = [i for i in its if i.get('vintedId') and i.get('ebayItemId') and i.get('vintedStatus') == 'active' and i.get('status') == 'listed' and i.get('vintedMatch') == 'runner' and i.get('vintedPhotos')]
+title_only = [i for i in its if i.get('vintedId') and i.get('ebayItemId') and i.get('vintedStatus') == 'active' and i.get('vintedMatch') == 'auto' and i.get('crossStatus') not in ('both', 'sold-vinted')]
+assert len(pairs) >= 4, len(pairs)
+P1, P2, P3, P4 = pairs[:4]
+today = time.strftime('%Y-%m-%d')
+for i in its:  # older sales in the copy are not part of these tests
+    if i.get('vintedStatus') == 'sold': i['saleDate'] = '2026-01-01'
+tdata = os.path.join(tmp, '..', 'data-0.3.4-%d.json' % os.getpid())
+def write_data(): json.dump(data, open(tdata, 'w'))
+write_data()
+def make4(mode='live'):
+    for f in os.listdir(tmp): os.remove(os.path.join(tmp, f))
+    del sent[:]
+    cfg = json.loads(json.dumps(X.DEFAULT_CONFIG)); cfg['mode'] = mode; cfg['github']['local_file'] = tdata; cfg['notify_every_sale'] = False
+    s = X.Service(cfg); s.ebay = FakeEbay(); s.mail = FakeMail(); assert s.cycle(); s.state['browser_seen'] = time.time(); return s
+code = lambda r: X.PHOTO_RE.search(r['vintedPhotos'][0]).group(1)
+
+# 1. a 3-item bundle: the email shows item 1 only; the helper reports the order -> all 3 off eBay, each said once
+s = make4()
+s.mail.raws = [vinted_mail('<bun1@v>', P1['title'], code(P1))]; s.cycle()
+assert s.ebay.zeroed == [str(P1['ebayItemId'])] and s.state.get('want_orders'), s.ebay.zeroed
+srv = ThreadingHTTPServer(('127.0.0.1', 0), X.make_handler(s)); threading.Thread(target=srv.serve_forever, daemon=True).start()
+port = srv.server_address[1]
+def call(path, body=None):
+    r = urllib.request.Request('http://127.0.0.1:%d%s' % (port, path), data=json.dumps(body).encode() if body is not None else None, headers={'Content-Type': 'application/json'})
+    return json.loads(urllib.request.urlopen(r, timeout=5).read())
+assert call('/queue')['want_orders'] is True
+order = {'txId': '900001', 'itemIds': [str(P1['vintedId']), str(P2['vintedId']), str(P3['vintedId'])], 'side': 'seller', 'sale': True, 'statusCode': 230, 'date': today + 'T10:00:00Z', 'title': P1['title']}
+assert call('/orders', {'orders': [order, {'txId': '900002', 'itemIds': [str(P4['vintedId'])], 'side': 'seller', 'sale': False, 'statusCode': 500, 'date': today, 'title': 'x'}]})['count'] == 2
+assert X.wake.is_set(); X.wake.clear()
+assert call('/queue')['want_orders'] is False  # answered
+s.cycle()
+assert sorted(s.ebay.zeroed) == sorted(str(p['ebayItemId']) for p in (P1, P2, P3)), s.ebay.zeroed  # P4's order was not a sale
+assert len([t for t in sent if t[0].startswith('Sold on Vinted, off eBay')]) == 3, sent
+s.cycle(); assert len(s.ebay.zeroed) == 3 and len(sent) == 3, 'said once only'
+srv.shutdown()
+print('bundle order ok')
+
+# 2. no order from the helper, but Mojonator marks the bundle items sold on Vinted -> backstop takes them off eBay
+s = make4()
+for p in (P2, P3): p['vintedStatus'] = 'sold'; p['crossStatus'] = 'sold-vinted'; p['saleDate'] = today
+write_data(); s.cycle()
+assert sorted(s.ebay.zeroed) == sorted([str(P2['ebayItemId']), str(P3['ebayItemId'])]), s.ebay.zeroed
+s.cycle(); assert len(s.ebay.zeroed) == 2
+# ... already off eBay: recorded, nothing said
+s = make4(); s.ebay.items[str(P2['ebayItemId'])] = {'id': str(P2['ebayItemId']), 'status': 'Completed', 'available': 0, 'title': ''}
+s.ebay.items[str(P3['ebayItemId'])] = {'id': str(P3['ebayItemId']), 'status': 'Active', 'available': 0, 'title': ''}
+s.cycle(); assert not s.ebay.zeroed and not sent, sent
+# ... a listing with more copies is never zeroed - alert only
+s = make4(); s.ebay.items[str(P2['ebayItemId'])] = {'id': str(P2['ebayItemId']), 'status': 'Active', 'available': 3, 'title': ''}
+s.cycle(); assert s.ebay.zeroed == [str(P3['ebayItemId'])] and any(t[0].startswith('Sold on Vinted - check eBay') and '3 available' in t[1] for t in sent), sent
+# ... an old sale is left alone
+for p in (P2, P3): p['saleDate'] = '2026-10-01'
+write_data(); s = make4(); s.cycle(); assert not s.ebay.zeroed and not sent
+for p in (P2, P3): p['vintedStatus'] = 'active'; p['crossStatus'] = ''; p['saleDate'] = ''
+write_data()
+print('backstop ok')
+
+# 3. the Vinted profile shows it sold (helper wardrobe), Mojonator not yet -> taken off eBay
+s = make4()
+X.save_json(X.WARD_FILE, {'at': X.iso(), 'items': [{'id': str(P4['vintedId']), 'title': P4['title'], 'closed': True, 'closing': 'sold', 'hidden': False, 'url': '', 'codes': []},
+                                                   {'id': str(P1['vintedId']), 'title': P1['title'], 'closed': False, 'closing': '', 'hidden': False, 'url': '', 'codes': []}]})
+s.cycle(); assert s.ebay.zeroed == [str(P4['ebayItemId'])], s.ebay.zeroed
+# ... an order whose item is for sale again on the profile (order cancelled) is not acted on
+s = make4(); X.save_json(X.WARD_FILE, {'at': X.iso(), 'items': [{'id': str(P1['vintedId']), 'title': P1['title'], 'closed': False, 'closing': '', 'hidden': False, 'url': '', 'codes': []}]})
+s.take_orders([dict(order, itemIds=[str(P1['vintedId'])])]); s.cycle(); assert not s.ebay.zeroed, s.ebay.zeroed
+print('profile ok')
+
+# 4. exact pairs only: a title-only link is an alert, never a change
+if title_only:
+    T = title_only[0]
+    s = make4(); s.take_orders([dict(order, txId='900009', itemIds=[str(T['vintedId'])])]); s.cycle()
+    assert not s.ebay.zeroed and len(sent) == 1 and sent[0][0].startswith('Sold on Vinted - on eBay too?') and 'title only' in sent[0][1], sent
+    print('title-only link ok')
+# 5. watch mode changes nothing; backup waits its delay
+s = make4('watch'); s.take_orders([order]); s.cycle(); assert not s.ebay.zeroed and len(sent) == 3 and all(t[0].startswith('Sold on Vinted: ') for t in sent), sent
+b = make4(); b.cfg['role'] = 'backup'; b.take_orders([order]); b.cycle(); assert not b.ebay.zeroed
+age(b, 21); b.cycle(); assert len(b.ebay.zeroed) == 3 and all(t[0].startswith('BACKUP took it off eBay') for t in sent), sent
+# 6. too many at once -> stop and alert
+s = make4(); s.BACKSTOP_MAX = 2; s.take_orders([order]); s.cycle(); assert len(s.ebay.zeroed) == 2 and any('too many' in t[0] for t in sent), sent
+print('modes ok')
+os.remove(tdata)
+print('0.3.4 ALL PASS')

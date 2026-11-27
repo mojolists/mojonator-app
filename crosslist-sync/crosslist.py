@@ -23,7 +23,7 @@ import urllib.error, urllib.parse, urllib.request
 from email.message import EmailMessage
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = '0.3.3'
+VERSION = '0.3.4'
 BASE = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__))
 CONFIG_FILE = os.path.join(BASE, 'config.json')
 STATE_FILE = os.path.join(BASE, 'state.json')
@@ -31,6 +31,7 @@ LOG_FILE = os.path.join(BASE, 'crosslist.log')
 ACTIONS_FILE = os.path.join(BASE, 'actions.csv')
 CACHE_FILE = os.path.join(BASE, 'mojonator-cache.json')
 WARD_FILE = os.path.join(BASE, 'vinted-wardrobe.json')
+ORDERS_FILE = os.path.join(BASE, 'vinted-orders.json')   # 0.3.4: Vinted orders (every item in each sale) from the browser helper
 
 DEFAULT_CONFIG = {
     'mode': 'watch',                       # 'watch' = alert only, change nothing.  'live' = act.
@@ -55,6 +56,7 @@ DEFAULT_CONFIG = {
 PHOTO_RE = re.compile(r'images\d*\.vinted\.net/t[a-z]*/(\d+_[0-9a-fA-F]+_[A-Za-z0-9]+)/')
 EBAY_SCOPE = 'https://api.ebay.com/oauth/api_scope/sell.inventory'
 lock = threading.RLock()
+wake = threading.Event()   # 0.3.4: the browser helper sent new Vinted orders - run a cycle now instead of waiting
 
 
 # ---------------------------------------------------------------- small helpers
@@ -165,7 +167,7 @@ class Links:
     """Which eBay item number / Vinted photo belongs to which Mojonator record."""
     def __init__(self, cfg, state):
         self.cfg, self.state = cfg, state
-        self.by_ebay, self.by_photo, self.by_title, self.count = {}, {}, {}, 0
+        self.by_ebay, self.by_photo, self.by_title, self.by_vinted, self.count = {}, {}, {}, {}, 0
         self.live, self.sku_of, self.items_seen = [], {}, 0
 
     def refresh(self):
@@ -188,7 +190,7 @@ class Links:
         self.build(data.get('items', []))
 
     def build(self, items):
-        by_ebay, by_photo, by_title, n = {}, {}, {}, 0
+        by_ebay, by_photo, by_title, by_vinted, n = {}, {}, {}, {}, 0
         live, sku_of = [], {}
         for it in items:
             if it.get('ebayItemId'): sku_of[str(it['ebayItemId'])] = it.get('sku') or it.get('location') or ''
@@ -206,7 +208,12 @@ class Links:
                    'ebayItemId': str(it.get('ebayItemId') or ''), 'vintedId': str(it.get('vintedId')),
                    'vintedUrl': it.get('vintedUrl') or ('https://www.vinted.com/items/' + str(it.get('vintedId'))),
                    'vintedStatus': it.get('vintedStatus') or '', 'crossStatus': it.get('crossStatus') or '',
-                   'status': it.get('status') or '', 'account': it.get('account') or ''}
+                   'status': it.get('status') or '', 'account': it.get('account') or '',
+                   # 0.3.4: an EXACT eBay <-> Vinted pair - made by the listing runner from the eBay item number, confirmed by Doug,
+                   # or marked as live on both sites by Mojonator.  Never an old title-only link.
+                   'exact': bool(it.get('ebayItemId')) and (it.get('vintedMatch') in ('runner', 'confirmed') or it.get('crossStatus') in ('both', 'sold-vinted')),
+                   'saleDate': str(it.get('saleDate') or '')[:10], 'ebayQty': it.get('ebayQty')}
+            by_vinted.setdefault(rec['vintedId'], []).append(rec)
             ids = [rec['ebayItemId']] + [str(p) for p in ((it.get('relist') or {}).get('prevIds') or [])]
             for i in ids:
                 if i: by_ebay.setdefault(i, []).append(rec)
@@ -214,10 +221,14 @@ class Links:
                 m = PHOTO_RE.search(u)
                 if m: by_photo.setdefault(m.group(1), []).append(rec)
             by_title.setdefault(norm_title(rec['title']), []).append(rec)
-        self.by_ebay, self.by_photo, self.by_title, self.count = by_ebay, by_photo, by_title, n
+        self.by_ebay, self.by_photo, self.by_title, self.by_vinted, self.count = by_ebay, by_photo, by_title, by_vinted, n
 
     def for_ebay_item(self, item_id):
         recs = {r['id']: r for r in self.by_ebay.get(str(item_id), [])}
+        return list(recs.values())
+
+    def for_vinted(self, vinted_id):
+        recs = {r['id']: r for r in self.by_vinted.get(str(vinted_id), [])}
         return list(recs.values())
 
     def for_photo_codes(self, codes):
@@ -630,6 +641,7 @@ class Service:
             if not m['codes']:
                 self.tell('Check Vinted sale', 'A Vinted sale email had no item photo to match (%s). Check whether the item is on eBay.' % name, key='nocode:' + m['id'], high=True); continue
             self.note('Vinted sale email: %s' % name)
+            self.state['want_orders'] = now()  # 0.3.4: the email shows only the first item of a bundle - have the browser helper read the whole order
             recs = self.links.for_photo_codes(m['codes'])
             unmatched = [c for c in m['codes'] if not self.links.by_photo.get(c)]
             for rec in recs: self.sold_on('vinted', rec, m['id'])
@@ -647,6 +659,107 @@ class Service:
                             self.tell('Check Vinted sale: ' + name, 'This Vinted listing could not be matched to anything. If the item is also on eBay, end it there.', key='nomatch:' + m['id'], high=True)
         self.state['mail_checked'] = now()
         return len(raws), new
+
+    # ---- 0.3.4 (Doug 2026-11-27): a Vinted BUNDLE sale email shows only its first item, so only that one came off eBay.
+    #      Three more ways now catch every item of a Vinted sale, and each acts ONLY on an exact Mojonator pair:
+    #        1. the Vinted order itself (all its item ids), read by the browser helper from Vinted's messages,
+    #        2. the helper's view of the Vinted profile (listing closed as sold),
+    #        3. Mojonator's own "sold on Vinted" mark (backstop, every cycle).
+    #      Recent sales only (BACKSTOP_DAYS).  A listing already off eBay is just recorded, quietly.  A listing with more than one
+    #      copy left is never zeroed - Doug gets an alert to take one copy off.  More than BACKSTOP_MAX in one cycle = stop and alert.
+    BACKSTOP_DAYS = 7
+    BACKSTOP_MAX = 40
+
+    def take_orders(self, orders):
+        """Store what the helper read; wake the main loop when a sale is new."""
+        clean = []
+        for o in orders or []:
+            ids = [str(i) for i in (o.get('itemIds') or []) if str(i).isdigit()]
+            if not ids or not o.get('txId'): continue
+            clean.append({'txId': str(o['txId']), 'itemIds': ids, 'side': str(o.get('side') or ''), 'sale': bool(o.get('sale')), 'statusCode': o.get('statusCode'),
+                          'date': str(o.get('date') or '')[:25], 'title': str(o.get('title') or '')[:120]})
+        if self.dry: return len(clean)
+        old = {(o['txId'], o['sale']) for o in self.vinted_orders()}
+        keep = {o['txId']: o for o in self.vinted_orders()}
+        for o in clean: keep[o['txId']] = o
+        cut = time.strftime('%Y-%m-%d', time.gmtime(now() - 86400 * 30))
+        save_json(ORDERS_FILE, {'at': iso(), 'orders': [o for o in keep.values() if (o['date'] or '9999')[:10] >= cut]})
+        self.state['orders_at'] = now()
+        fresh = [o for o in clean if o['sale'] and (o['txId'], True) not in old]
+        if fresh:
+            log('Vinted orders from the browser helper: %d, new sale(s): %s' % (len(clean), ', '.join('%s (%d item%s)' % (o['txId'], len(o['itemIds']), '' if len(o['itemIds']) == 1 else 's') for o in fresh[:8])))
+            wake.set()
+        return len(clean)
+
+    def vinted_orders(self):
+        o = load_json(ORDERS_FILE, None) if not self.dry else None
+        return (o or {}).get('orders') or []
+
+    def vinted_sold_ids(self):
+        """{vintedId: why} for items that recent Vinted sales or the Vinted profile say are sold."""
+        out, cut = {}, time.strftime('%Y-%m-%d', time.gmtime(now() - 86400 * self.BACKSTOP_DAYS))
+        ward = {str(w.get('id')): w for w in self.wardrobe()}
+        for o in self.vinted_orders():
+            if o.get('side') != 'seller' or not o.get('sale'): continue
+            if str(o.get('date') or '9999')[:10] < cut: continue
+            ids = [str(i) for i in (o.get('itemIds') or []) if i]
+            for vid in ids:
+                w = ward.get(vid)
+                if w is not None and not w.get('closed'): continue  # the profile shows it for sale again (order cancelled)
+                out.setdefault(vid, 'Vinted order %s (%d item%s)' % (o.get('txId'), len(ids), '' if len(ids) == 1 else 's'))
+        for vid, w in ward.items():
+            if w.get('closed') and w.get('closing', 'sold') in ('sold', '') and vid not in out:
+                out[vid] = 'Vinted profile shows it sold'
+        return out, cut
+
+    def backstop(self):
+        """Every Vinted-sold item with an exact eBay pair must be off eBay."""
+        if not self.links.count: return 0, 0
+        done = self.state.setdefault('backstop', {})
+        for k in [k for k, v in done.items() if now() - v > 45 * 86400]: done.pop(k, None)
+        sold, cut = self.vinted_sold_ids()
+        cands = {}
+        for vid, why in sold.items():
+            for rec in self.links.for_vinted(vid):
+                if rec['saleDate'] and rec['saleDate'] < cut: continue  # an old sale - not this program's business any more
+                cands[rec['id']] = (rec, why)
+        for recs in self.links.by_vinted.values():
+            for rec in recs:
+                if rec['vintedStatus'] == 'sold' and rec['id'] not in cands and (not rec['saleDate'] or rec['saleDate'] >= cut):
+                    cands[rec['id']] = (rec, 'Mojonator marks it sold on Vinted')
+        checked = acted = 0
+        for rid, (rec, why) in cands.items():
+            if rid in done or not rec['ebayItemId']: continue
+            prev = self.state['sold'].get(rid)
+            if prev and prev.get('site') == 'vinted': done[rid] = now(); continue  # already handled (sale email)
+            if self.too_fresh('bs:' + rid): continue
+            if prev:  # it sold on eBay first and now Vinted shows it sold too
+                self.sold_on('vinted', rec, why); done[rid] = now(); continue
+            if acted >= self.BACKSTOP_MAX:
+                self.tell('Crosslist sync stopped: too many at once', 'More than %d eBay listings would come off eBay in one go because Vinted shows them sold. Nothing more was changed. Check the log on the %s.' % (self.BACKSTOP_MAX, self.pc), key='bsmax', high=True)
+                break
+            try: st = self.ebay.item_state(rec['ebayItemId'])
+            except Exception as e:
+                log('backstop: could not check eBay %s for "%s": %s' % (rec['ebayItemId'], rec['title'][:50], e)); continue  # next cycle tries again
+            checked += 1
+            if st['available'] < 1:
+                done[rid] = now(); continue  # already off eBay - nothing to say
+            if not rec['exact']:  # an old title-only link: never changed automatically, only an alert
+                done[rid] = now()
+                self.note('  %s: "%s" - linked to eBay %s by title only, NOT changed - alert' % (why, rec['title'][:60], st['id']))
+                self.tell('Sold on Vinted - on eBay too? ' + rec['title'][:45], 'Sold on Vinted (%s). Mojonator links it to live eBay listing %s by title only, so nothing was changed. End it only if it is the same item. Location %s.' % (why, st['id'], rec['location'] or '?'),
+                          click='https://www.ebay.com/itm/' + st['id'], key='bstitle:' + rid, high=True)
+                continue
+            if st['available'] > 1:
+                done[rid] = now()
+                self.note('  %s: "%s" - eBay %s still has %d available, NOT changed (more than one copy) - alert' % (why, rec['title'][:60], st['id'], st['available']))
+                self.tell('Sold on Vinted - check eBay: ' + rec['title'][:45], 'Sold on Vinted (%s). The eBay listing still has %d available, so nothing was changed. Take one copy off eBay. Location %s.' % (why, st['available'], rec['location'] or '?'),
+                          click='https://www.ebay.com/itm/' + st['id'], key='bsmulti:' + rid, high=True)
+                continue
+            self.note('Vinted sale (%s): %s - still live on eBay %s' % (why, rec['title'][:70], st['id']))
+            self.sold_on('vinted', rec, why)
+            done[rid] = now(); acted += 1
+        return checked, acted
 
     def check_queue(self):
         """Hides the browser has not confirmed in time -> alert with the link."""
@@ -668,12 +781,14 @@ class Service:
         ok = True; first = not self.state.get('baselined')
         steps = [('Mojonator links', lambda: self.links.refresh()),
                  ('eBay orders', lambda: self.check_ebay(baseline=first)),
-                 ('Vinted sale emails', lambda: self.check_mail(baseline=first))]
+                 ('Vinted sale emails', lambda: self.check_mail(baseline=first)),
+                 ('Vinted orders backstop', lambda: None if first else self.backstop())]
         for name, fn in steps:
             try:
                 r = fn()
                 if name == 'eBay orders': log('eBay: %d order(s) in window, %d new%s' % (r[0], r[1], ' (baseline, not acted on)' if first else ''))
                 if name == 'Vinted sale emails': log('mail: %d Vinted sale email(s) in window, %d new%s' % (r[0], r[1], ' (baseline, not acted on)' if first else ''))
+                if name == 'Vinted orders backstop' and r and (r[0] or r[1]): log('backstop: %d still-open eBay pair(s) checked, %d taken off eBay' % r)
                 self.state.get('fails', {}).pop(name, None)
             except Exception as e:
                 ok = False
@@ -716,7 +831,8 @@ def make_handler(svc):
                 with lock:
                     svc.state['browser_seen'] = now()
                     q = [{'vintedId': x['vintedId'], 'title': x['title']} for x in svc.state['queue'] if not x['done']] if svc.live else []
-                self._send(200, {'mode': svc.cfg.get('mode'), 'queue': q, 'version': VERSION, 'role': 'backup' if svc.backup else 'main'})
+                    want = now() - (svc.state.get('want_orders') or 0) < 3 * 3600 and (svc.state.get('orders_at') or 0) < svc.state.get('want_orders', 0)
+                self._send(200, {'mode': svc.cfg.get('mode'), 'queue': q, 'version': VERSION, 'role': 'backup' if svc.backup else 'main', 'want_orders': bool(want)})
             elif self.path.startswith('/ghtoken'):  # 0.3.0: the browser helper keeps Mojonator's Vinted links up to date with this
                 g = svc.cfg.get('github', {})
                 self._send(200, {'token': g.get('token') or '', 'repo': g.get('repo') or '', 'role': 'backup' if svc.backup else 'main', 'version': VERSION})
@@ -760,7 +876,7 @@ def make_handler(svc):
                     for u in o.get('photos') or []:
                         m = PHOTO_RE.search(u or '')
                         if m and m.group(1) not in codes: codes.append(m.group(1))
-                    items.append({'id': str(o.get('id')), 'title': o.get('title') or '', 'closed': bool(o.get('closed')), 'hidden': bool(o.get('hidden')), 'url': o.get('url') or '', 'codes': codes})
+                    items.append({'id': str(o.get('id')), 'title': o.get('title') or '', 'closed': bool(o.get('closed')), 'closing': str(o.get('closing') or ''), 'hidden': bool(o.get('hidden')), 'url': o.get('url') or '', 'codes': codes})
                 with lock:
                     svc.state['browser_seen'] = now()
                     if items:
@@ -771,10 +887,19 @@ def make_handler(svc):
                                         click='https://www.vinted.com/items/' + str(u.get('vintedId')), key='unsure:' + str(u.get('vintedId')), repeat_hours=24 * 365)
                     r = body.get('sync')
                     if r: log('Mojonator Vinted sync by the browser helper: %s' % str(r)[:300])
+                    if body.get('orders') is not None: svc.take_orders(body.get('orders'))
                     for mk in body.get('marked') or []:
                         log('  marked cross-listed in Mojonator: %s (eBay %s, Vinted %s, %s)' % (str(mk.get('title'))[:60], mk.get('ebayItemId'), mk.get('vintedId'), mk.get('sku')))
                     svc.save()
                 self._send(200, {'ok': True, 'count': len(items)})
+            elif self.path.startswith('/orders'):  # 0.3.4: recent Vinted sales with every item in each (from Vinted's messages)
+                try: body = json.loads(self.rfile.read(int(self.headers.get('Content-Length') or 0)) or b'{}')
+                except Exception: body = {}
+                with lock:
+                    svc.state['browser_seen'] = now()
+                    n = svc.take_orders(body.get('orders') or [])
+                    svc.save()
+                self._send(200, {'ok': True, 'count': n})
             else: self._send(404, {'error': 'not found'})
     return H
 
@@ -834,7 +959,8 @@ def main():
         try: svc.cycle()
         except Exception as e:
             log('cycle crashed: %s' % e); log(traceback.format_exc(limit=5))
-        time.sleep(max(60, float(cfg.get('poll_minutes', 10)) * 60))
+        wake.wait(max(60, float(cfg.get('poll_minutes', 10)) * 60)); wake.clear()  # 0.3.4: a new Vinted order wakes it early
+        time.sleep(5)
 
 
 if __name__ == '__main__':

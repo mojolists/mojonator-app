@@ -18,7 +18,7 @@
        orders:[{txId,title,price,date,status}], runner:[{vintedId,ebayItemId,title,price,listedAt}] } */
 (function (root) {
   'use strict';
-  var VERSION = 'v7'; // v7: a Vinted-only listing (Mojo Lister Vinted checkbox) is ALWAYS its own new item, made before any title matching, and syncAll never auto-links by title (MOJO_VINTED_V7_NEWITEM, Doug 2026-11-18: a newly listed item is not the one that already exists); v6: a title match is never a link - only exact eBay item numbers are (2026-11-17); v5: syncAll() marks cross-listed items at once (MOJO_VINTED_V5_CROSSMARK); v2: listing photo URLs (vintedPhotos); v3: multi-copy items (quantity) split one copy per Vinted listing; v4: cross-listed items (crossStatus, MOJO_SYNC_V7_CROSSLIST)
+  var VERSION = 'v8'; // v8: sold orders come from Vinted's messages (my_orders is gone), a bundle's items are matched by item id and its total is split (2026-11-27); v7: a Vinted-only listing (Mojo Lister Vinted checkbox) is ALWAYS its own new item, made before any title matching, and syncAll never auto-links by title (MOJO_VINTED_V7_NEWITEM, Doug 2026-11-18: a newly listed item is not the one that already exists); v6: a title match is never a link - only exact eBay item numbers are (2026-11-17); v5: syncAll() marks cross-listed items at once (MOJO_VINTED_V5_CROSSMARK); v2: listing photo URLs (vintedPhotos); v3: multi-copy items (quantity) split one copy per Vinted listing; v4: cross-listed items (crossStatus, MOJO_SYNC_V7_CROSSLIST)
   var STOP = {}; 'cd cds dvd dvds blu ray bluray the of a an and with new like good very used disc discs edition lot in to for by on movie movies album'.split(' ').forEach(function (w) { STOP[w] = 1; });
 
   function toks(s) {
@@ -186,14 +186,21 @@
       var sold = L.closed && (L.closing === 'sold' || !L.closing);
       if (sold) {
         it.vintedStatus = 'sold';
+        var byId = orders.filter(function (o) { return o.sale !== false && (o.itemIds || []).map(String).indexOf(String(vid)) >= 0; })[0]; // v8: exact item id from the order
+        if (byId && String(it.vintedTxId || '') !== String(byId.txId)) it.vintedTxId = String(byId.txId);
         if (!it.vintedTxId) {
-          var o = orders.filter(function (o) { return !usedOrders[o.txId] && normT(o.title) === normT(L.title); })[0];
+          var o = orders.filter(function (o) { return !usedOrders[o.txId] && o.sale !== false && !(o.itemIds && o.itemIds.length > 1) && normT(o.title) === normT(L.title); })[0];
           if (o) { usedOrders[o.txId] = 1; it.vintedTxId = String(o.txId); }
         }
         var ord = it.vintedTxId && orders.filter(function (o) { return String(o.txId) === String(it.vintedTxId); })[0];
         if (ord) {
           usedOrders[ord.txId] = 1;
-          it.salePrice = parseFloat(ord.price) || it.salePrice || price; it.saleDate = String(ord.date || '').slice(0, 10) || it.saleDate || day;
+          var share = parseFloat(ord.price);
+          if (ord.itemIds && ord.itemIds.length > 1 && !isNaN(share)) { // v8: a bundle - split its total by the listed prices
+            var tot = 0; ord.itemIds.forEach(function (i) { var w = wardrobe[String(i)]; tot += (w && parseFloat(w.price)) || 0; });
+            share = tot > 0 && !isNaN(price) ? Math.round(share * price / tot * 100) / 100 : Math.round(share / ord.itemIds.length * 100) / 100;
+          }
+          it.salePrice = share || it.salePrice || price; it.saleDate = String(ord.date || '').slice(0, 10) || it.saleDate || day;
           it.vintedOrderStatus = ord.status || '';
           it.status = shippedStatus(ord.status) || it.status === 'shipped' ? 'shipped' : 'sold';
         } else {
@@ -295,7 +302,43 @@
 
   /* Build a snapshot on vinted.com (userscript + bookmarklet). fetchJson(url) -> Promise<json>. */
   function photoUrls(o) { return (o.photos || []).map(function (p) { return p.full_size_url || p.url || ''; }).filter(Boolean); }
-  function collect(fetchJson, memberId, runnerLog) {
+  /* v8 (2026-11-27): Vinted retired /api/v2/my_orders (404), so sold orders come from Vinted's messages instead:
+     every sale has a conversation whose transaction lists ALL its item ids (a bundle too). Seller side only.
+     opts.cache {get(k), set(k,v)} keeps each conversation's order so only changed conversations are read again;
+     opts.days (default 60) stops at older conversations; opts.pages (default 6, 50 a page). */
+  function orderOf(cv, upd) {
+    var t = cv && cv.transaction; if (!t || t.current_user_side !== 'seller') return null;
+    var code = Number(t.status) || 0, ship = Number(t.shipment_status) || 0, msgs = cv.messages || [];
+    var ts = msgs.length && msgs[0].created_at_ts ? new Date(msgs[0].created_at_ts * 1000).toISOString() : String(upd || '');
+    var ids = (t.item_ids && t.item_ids.length ? t.item_ids : (t.item_id ? [t.item_id] : [])).map(String);
+    return { txId: String(t.id), title: t.item_title || '', price: t.offer_price && t.offer_price.amount, date: ts, itemIds: ids, count: Number(t.item_count) || ids.length,
+      statusCode: code, sale: code >= 200 && code < 500, side: 'seller',
+      status: code >= 500 ? 'canceled' : (code >= 450 ? 'completed' : (ship >= 300 ? 'shipped' : (code >= 200 ? 'paid' : 'offer'))) };
+  }
+  function readOrders(fetchJson, opts) {
+    var orders = [];
+    function pageO(p) {
+      var days = (opts && opts.days) || 60, pages = (opts && opts.pages) || 6, cache = opts && opts.cache, cut = Date.now() - days * 86400000, more = true;
+      return fetchJson('/api/v2/inbox?page=' + p + '&per_page=50').then(function (j) {
+        var convs = j.conversations || [];
+        if (!convs.length) more = false;
+        return convs.reduce(function (pr, c) {
+          return pr.then(function () {
+            if (!more) return;
+            if (c.updated_at && new Date(c.updated_at).getTime() < cut) { more = false; return; }
+            var key = c.id + '@' + (c.updated_at || ''), hit = cache && cache.get(key);
+            if (hit !== undefined && hit !== null) { if (hit) orders.push(hit); return; }
+            return fetchJson('/api/v2/conversations/' + c.id).then(function (k) {
+              var o = orderOf(k.conversation, c.updated_at); if (cache) cache.set(key, o || false);
+              if (o) orders.push(o);
+            }).catch(function () {}).then(function () { return new Promise(function (r) { setTimeout(r, 250); }); });
+          });
+        }, Promise.resolve()).then(function () { if (more && p < pages) return pageO(p + 1); });
+      });
+    }
+    return pageO(1).then(function () { return orders; });
+  }
+  function collect(fetchJson, memberId, runnerLog, opts) {
     var wardrobe = [], orders = [], complete = true;
     function pageW(p) {
       return fetchJson('/api/v2/wardrobe/' + memberId + '/items?page=' + p + '&per_page=96&order=newest_first').then(function (j) {
@@ -306,16 +349,8 @@
         if (p < tp && p < 50) return pageW(p + 1);
       });
     }
-    function pageO(p) {
-      return fetchJson('/api/v2/my_orders?type=sold&status=all&per_page=100&page=' + p).then(function (j) {
-        var arr = j.my_orders || [];
-        arr.forEach(function (o) { orders.push({ txId: o.transaction_id, title: o.title, price: o.price && o.price.amount, date: o.date, status: o.status }); });
-        var tp = (j.pagination && j.pagination.total_pages) || (arr.length >= 100 ? p + 1 : p);
-        if (p < tp && p < 50) return pageO(p + 1);
-      });
-    }
     return pageW(1).catch(function (e) { complete = false; throw e; })
-      .then(function () { return pageO(1).catch(function () { /* orders are optional */ }); })
+      .then(function () { return readOrders(fetchJson, opts).then(function (o) { orders = o; }).catch(function () { /* orders are optional */ }); })
       .then(function () { return { at: new Date().toISOString(), complete: complete, memberId: String(memberId), wardrobe: wardrobe, orders: orders, runner: runnerLog || [] }; });
   }
 
@@ -410,7 +445,7 @@
     return rep;
   }
 
-  var api = { VERSION: VERSION, splitCopy: splitCopy, merge: merge, dedupe: dedupe, link: link, keepAsNew: keepAsNew, unlink: unlink, search: search, rank: rank, decide: decide, collect: collect, syncAll: syncAll, crossPrep: crossPrep, ebayTwin: ebayTwin, splitSku: splitSku, _score: function (a, b) { return score(toks(a), toks(b)); } };
+  var api = { VERSION: VERSION, splitCopy: splitCopy, merge: merge, dedupe: dedupe, link: link, keepAsNew: keepAsNew, unlink: unlink, search: search, rank: rank, decide: decide, collect: collect, readOrders: readOrders, syncAll: syncAll, crossPrep: crossPrep, ebayTwin: ebayTwin, splitSku: splitSku, _score: function (a, b) { return score(toks(a), toks(b)); } };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.MojoVinted = api;
 })(typeof window !== 'undefined' ? window : this);

@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         Mojo Crosslist - Vinted hider
 // @namespace    https://mojolists.com/
-// @version      0.3.2
+// @version      0.3.4
 // @description  Hides a Vinted listing when the Crosslist Sync program on this PC says its twin sold on eBay, and keeps Mojonator's Vinted links and cross-listed marks up to date.
 // @match        https://www.vinted.com/*
 // @grant        GM_xmlhttpRequest
 // @connect      127.0.0.1
 // @connect      api.github.com
-// @require      https://mojolists.com/mojonator-app/vinted-merge.js?v=140
+// @require      https://mojolists.com/mojonator-app/vinted-merge.js?v=141
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/mojolists/mojonator-app/main/crosslist-sync/vinted-hider.user.js
 // @downloadURL  https://raw.githubusercontent.com/mojolists/mojonator-app/main/crosslist-sync/vinted-hider.user.js
@@ -106,6 +106,7 @@
       catch (e) { try { await local('POST', '/done', { vintedId: it.vintedId, ok: false, detail: String(e.message || e) }); } catch (e2) {} break; } // stop on the first failure
       await sleep(20000 + Math.random() * 20000); // unhurried, like a person
     }
+    if (q && q.want_orders) { try { await quickOrders(); } catch (e) {} } // 0.3.4: a sale email just came in - read the whole order now
     try { await mojoSync(); } catch (e) {} // 0.3.0
   }
   /* ---- 0.3.0 (2026-11-17): keep Mojonator's Vinted links and "eBay + Vinted" marks current, from this always-open tab.
@@ -115,7 +116,21 @@
      something changed - runs Mojonator's own Vinted sync (vinted-merge.js syncAll: links listings by exact eBay item number
      from the listing runner's records, marks those live on both sites; a title match is never a link, only an alert) and saves data.json with the GitHub token from the program's config.json. The backup PC gives the main PC
      20 minutes to do it first. Nothing is written between :12 and :30 (the hourly eBay sync commits at :17). */
-  var SYNC_EVERY = 15 * 60 * 1000, XKEY = '__mojo_xsync';
+  var SYNC_EVERY = 15 * 60 * 1000, XKEY = '__mojo_xsync', CKEY = '__mojo_vconv';
+  /* 0.3.4 (2026-11-27): a Vinted bundle sale email shows only its first item. Vinted's messages hold the whole order (every item id),
+     so the helper reads recent sales there and hands them to the program, which takes every item with an exact eBay pair off eBay.
+     Each conversation is read once and kept here (keyed by its last change), so later reads only open changed ones. */
+  function convCache() {
+    var m = lget(CKEY, {}), dirty = false;
+    return { get: function (k) { return m[k]; }, set: function (k, v) { m[k] = v; dirty = true; },
+      save: function () { if (!dirty) return; var ks = Object.keys(m); if (ks.length > 600) ks.slice(0, ks.length - 500).forEach(function (k) { delete m[k]; }); lset(CKEY, m); } };
+  }
+  function slimOrders(list) { return (list || []).map(function (o) { return { txId: o.txId, itemIds: o.itemIds, side: o.side, sale: o.sale, statusCode: o.statusCode, date: o.date, title: o.title }; }); }
+  async function quickOrders() {
+    if (typeof MojoVinted === 'undefined' || !MojoVinted.readOrders) return;
+    var c = convCache(), list = await MojoVinted.readOrders(vget, { cache: c, days: 3, pages: 1 }); c.save();
+    await local('POST', '/orders', { orders: slimOrders(list) });
+  }
   function lget(k, d) { try { var v = JSON.parse(localStorage.getItem(k) || 'null'); return v == null ? d : v; } catch (e) { return d; } }
   function lset(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
   async function vget(url) { var r = await vfetch(url, { headers: { accept: 'application/json' }, credentials: 'include' }); if (!r.ok) throw new Error('Vinted ' + r.status + ' on ' + url.split('?')[0]); return r.json(); }
@@ -169,10 +184,10 @@
     if (typeof MojoVinted === 'undefined' || !MojoVinted.syncAll) return;
     if (/\/items\/(new|\d+\/edit)|\/checkout/.test(location.pathname)) return;
     st.at = Date.now(); lset(XKEY, st);
-    var snap = await MojoVinted.collect(vget, MEMBER, runnerLog());
+    var cc = convCache(), snap = await MojoVinted.collect(vget, MEMBER, runnerLog(), { cache: cc, days: 60 }); cc.save();
     snap.vintedOnly = lget('__mojo_vinted_only_log', []);
     if (!snap.wardrobe.length) return;
-    var out = { items: snap.wardrobe.map(function (o) { return { id: o.id, title: o.title, closed: o.closed, hidden: o.hidden, url: o.url, photos: o.photos }; }) };
+    var out = { items: snap.wardrobe.map(function (o) { return { id: o.id, title: o.title, closed: o.closed, closing: o.closing, hidden: o.hidden, url: o.url, photos: o.photos }; }), orders: slimOrders(snap.orders) };
     var cfg = null; try { cfg = await local('GET', '/ghtoken'); } catch (e) {}
     var hash = hashOf(snap), need = hash !== st.hash || Date.now() - (st.synced || 0) > 12 * 3600 * 1000;
     if (cfg && cfg.token && cfg.repo && need) {
